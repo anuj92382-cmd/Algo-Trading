@@ -1,0 +1,398 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Zerodha Login | Algo Trading Bot</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            background: #0a0e1a;
+            font-family: 'Segoe UI', sans-serif;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            background-image: radial-gradient(ellipse at 20% 50%, #1a2744 0%, transparent 60%),
+                              radial-gradient(ellipse at 80% 20%, #0d2137 0%, transparent 60%);
+        }
+
+        .login-wrapper {
+            width: 100%;
+            max-width: 480px;
+            padding: 20px;
+        }
+
+        .logo-area {
+            text-align: center;
+            margin-bottom: 32px;
+        }
+
+        .logo-area .bot-icon {
+            font-size: 56px;
+            display: block;
+            margin-bottom: 12px;
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { transform: scale(1); }
+            50% { transform: scale(1.05); }
+        }
+
+        .logo-area h1 {
+            color: #fff;
+            font-size: 26px;
+            font-weight: 700;
+            letter-spacing: 1px;
+        }
+
+        .logo-area p {
+            color: #5a7fa8;
+            font-size: 13px;
+            margin-top: 6px;
+        }
+
+        .card {
+            background: #111827;
+            border: 1px solid #1e2d40;
+            border-radius: 16px;
+            padding: 32px;
+            box-shadow: 0 25px 60px rgba(0,0,0,0.5);
+        }
+
+        .step {
+            display: flex;
+            align-items: flex-start;
+            gap: 16px;
+            margin-bottom: 24px;
+            padding-bottom: 24px;
+            border-bottom: 1px solid #1e2d40;
+        }
+
+        .step:last-of-type {
+            border-bottom: none;
+            margin-bottom: 0;
+            padding-bottom: 0;
+        }
+
+        .step-num {
+            background: #1e40af;
+            color: #fff;
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 700;
+            font-size: 14px;
+            flex-shrink: 0;
+            margin-top: 2px;
+        }
+
+        .step-content h3 {
+            color: #e2e8f0;
+            font-size: 15px;
+            margin-bottom: 8px;
+        }
+
+        .step-content p {
+            color: #64748b;
+            font-size: 13px;
+            line-height: 1.6;
+        }
+
+        .btn-zerodha {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+            width: 100%;
+            padding: 14px;
+            background: linear-gradient(135deg, #2563eb, #1d4ed8);
+            color: #fff;
+            border: none;
+            border-radius: 10px;
+            font-size: 15px;
+            font-weight: 600;
+            cursor: pointer;
+            text-decoration: none;
+            transition: all 0.2s;
+            margin-top: 12px;
+        }
+
+        .btn-zerodha:hover {
+            background: linear-gradient(135deg, #1d4ed8, #1e3a8a);
+            transform: translateY(-1px);
+            box-shadow: 0 8px 25px rgba(37,99,235,0.4);
+        }
+
+        .token-section {
+            margin-top: 24px;
+        }
+
+        .token-section label {
+            display: block;
+            color: #94a3b8;
+            font-size: 13px;
+            margin-bottom: 8px;
+            font-weight: 500;
+        }
+
+        .token-input-row {
+            display: flex;
+            gap: 10px;
+        }
+
+        .token-input-row input {
+            flex: 1;
+            background: #1e293b;
+            border: 1px solid #334155;
+            color: #e2e8f0;
+            padding: 12px 16px;
+            border-radius: 10px;
+            font-size: 14px;
+            font-family: monospace;
+            transition: border-color 0.2s;
+        }
+
+        .token-input-row input:focus {
+            outline: none;
+            border-color: #2563eb;
+            box-shadow: 0 0 0 3px rgba(37,99,235,0.2);
+        }
+
+        .token-input-row input::placeholder { color: #475569; }
+
+        .btn-submit {
+            padding: 12px 20px;
+            background: #16a34a;
+            color: #fff;
+            border: none;
+            border-radius: 10px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+            white-space: nowrap;
+        }
+
+        .btn-submit:hover {
+            background: #15803d;
+            transform: translateY(-1px);
+        }
+
+        .hint-box {
+            background: #0c1929;
+            border: 1px solid #1e3a5f;
+            border-radius: 10px;
+            padding: 12px 16px;
+            margin-top: 16px;
+        }
+
+        .hint-box p {
+            color: #64748b;
+            font-size: 12px;
+            line-height: 1.7;
+        }
+
+        .hint-box code {
+            background: #1e293b;
+            color: #38bdf8;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-family: monospace;
+            font-size: 11px;
+        }
+
+        #msg {
+            display: none;
+            padding: 12px 16px;
+            border-radius: 10px;
+            font-size: 13px;
+            margin-top: 14px;
+            text-align: center;
+        }
+
+        #msg.error   { background: #1f0a0a; border: 1px solid #dc2626; color: #fca5a5; }
+        #msg.success { background: #022c22; border: 1px solid #16a34a; color: #86efac; }
+        #msg.loading { background: #0f172a; border: 1px solid #2563eb; color: #93c5fd; }
+
+        .divider {
+            text-align: center;
+            margin: 20px 0;
+            position: relative;
+        }
+        .divider::before {
+            content: '';
+            position: absolute;
+            top: 50%;
+            left: 0;
+            right: 0;
+            height: 1px;
+            background: #1e2d40;
+        }
+        .divider span {
+            background: #111827;
+            color: #475569;
+            font-size: 12px;
+            padding: 0 12px;
+            position: relative;
+        }
+
+        .mode-badge {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 11px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin-top: 8px;
+        }
+        .paper  { background: #422006; color: #fb923c; border: 1px solid #92400e; }
+        .live   { background: #1f0a0a; color: #f87171; border: 1px solid #7f1d1d; }
+    </style>
+</head>
+<body>
+    <div class="login-wrapper">
+        <div class="logo-area">
+            <span class="bot-icon">🤖</span>
+            <h1>ALGO TRADING BOT</h1>
+            <p>Zerodha Kite Connect</p>
+            {% if is_paper is defined %}
+            <span class="mode-badge paper">📄 Paper Trading Mode</span>
+            {% endif %}
+        </div>
+
+        <div class="card">
+            <!-- Step 1 -->
+            <div class="step">
+                <div class="step-num">1</div>
+                <div class="step-content">
+                    <h3>Zerodha se Login Karo</h3>
+                    <p>Niche button click karo - Zerodha login page naye tab mein khulega.<br>
+                    Login ke baad <b style="color:#4ade80">automatically dashboard khul jayega!</b></p>
+                    <a href="{{ login_url }}" target="_self" class="btn-zerodha">
+                        🔐 &nbsp; Zerodha se Login Karo (Click Here)
+                    </a>
+                    <p style="margin-top:10px; color:#475569; font-size:12px;">
+                        ⚠️ Agar redirect kaam na kare toh Step 2 manual karo
+                    </p>
+                </div>
+            </div>
+
+            <!-- Step 2 - Manual fallback -->
+            <div class="step">
+                <div class="step-num">2</div>
+                <div class="step-content">
+                    <h3>Manual Token (Agar auto redirect na ho)</h3>
+                    <p style="color:#475569; font-size:12px; margin-bottom:10px;">
+                        Login ke baad browser address bar mein URL kuch aisa dikhega:<br>
+                        <code style="font-size:11px">http://localhost:5000/callback?request_token=<b>ABCD1234</b>&status=success</code><br><br>
+                        Agar wahan nahi gaya toh URL se <b>request_token=</b> ke baad wala code copy karo:
+                    </p>
+                    <div class="token-section">
+                        <label>Request Token (manual)</label>
+                        <div class="token-input-row">
+                            <input type="text" id="tokenInput"
+                                   placeholder="Token yahan paste karo..."
+                                   autocomplete="off" autocorrect="off" spellcheck="false">
+                            <button class="btn-submit" onclick="submitToken()">
+                                ✅ Login
+                            </button>
+                        </div>
+                    </div>
+                    <div id="msg"></div>
+                </div>
+            </div>
+        </div>
+
+        {% if error %}
+        <div style="margin-top:16px; padding:12px 16px; background:#1f0a0a;
+                    border:1px solid #dc2626; border-radius:10px; color:#fca5a5; font-size:13px;">
+            ❌ {{ error }}
+        </div>
+        {% endif %}
+
+        <!-- Important Note -->
+        <div style="margin-top:16px; padding:14px 16px; background:#0c1a2e;
+                    border:1px solid #1e3a5f; border-radius:10px; font-size:12px; color:#64748b; line-height:1.8;">
+            <b style="color:#93c5fd;">⚠️ Important Note:</b><br>
+            • Historical data aur WebSocket ke liye Kite app ka type
+              <b style="color:#fb923c;">"Connect"</b> hona chahiye (Personal type mein nahi milta)<br>
+            • <b style="color:#93c5fd;">developers.kite.trade</b> pe apni app ki settings check karo<br>
+            • App type change karo: <b>Connect (500 credits/30 days)</b>
+        </div>
+    </div>
+
+    <script>
+        // Enter key se submit
+        document.getElementById('tokenInput').addEventListener('keydown', function(e) {
+            if (e.key === 'Enter') submitToken();
+        });
+
+        function showMsg(text, type) {
+            const el = document.getElementById('msg');
+            el.innerHTML = text;
+            el.className = type;
+            el.style.display = 'block';
+        }
+
+        async function submitToken() {
+            const tokenEl = document.getElementById('tokenInput');
+            const token   = tokenEl.value.trim();
+
+            if (!token) {
+                showMsg('⚠️ Token empty hai! Zerodha se copy karke yahan paste karo.', 'error');
+                tokenEl.focus();
+                return;
+            }
+
+            // Button disable karo
+            const btn = document.querySelector('.btn-submit');
+            btn.disabled    = true;
+            btn.textContent = '⏳ Wait...';
+            showMsg('⏳ Zerodha se connect ho raha hai...', 'loading');
+
+            try {
+                const response = await fetch('/api/login', {
+                    method:  'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body:    JSON.stringify({ request_token: token })
+                });
+
+                // Response parse karo
+                const text = await response.text();
+                let data;
+                try {
+                    data = JSON.parse(text);
+                } catch(parseErr) {
+                    showMsg('❌ Server response error: ' + text.substring(0, 100), 'error');
+                    btn.disabled    = false;
+                    btn.textContent = '✅ Login';
+                    return;
+                }
+
+                if (data.success) {
+                    showMsg(`✅ Login successful! Welcome <b>${data.user_name}</b>!<br>Dashboard load ho raha hai...`, 'success');
+                    setTimeout(() => {
+                        window.location.href = data.redirect || '/';
+                    }, 1500);
+                } else {
+                    showMsg('❌ ' + (data.error || 'Login failed'), 'error');
+                    btn.disabled    = false;
+                    btn.textContent = '✅ Login';
+                }
+
+            } catch (networkErr) {
+                showMsg('❌ Network Error: ' + networkErr.message + '<br>Server running hai? STOP.bat phir START.bat chalao.', 'error');
+                btn.disabled    = false;
+                btn.textContent = '✅ Login';
+            }
+        }
+    </script>
+</body>
+</html>

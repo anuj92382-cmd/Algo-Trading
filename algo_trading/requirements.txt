@@ -1,0 +1,40 @@
+# Zerodha Kite Connect
+kiteconnect==4.2.0
+
+# Data Analysis (Python 3.12+ compatible versions)
+pandas>=2.2.0
+numpy>=2.0.0
+
+# Technical Indicators
+ta==0.11.0
+# pandas-ta has issues on newer Python - using 'ta' library instead
+
+# Scheduling
+schedule==1.2.1
+APScheduler==3.10.4
+
+# Logging & Utilities
+python-dotenv==1.0.0
+colorlog==6.8.0
+colorama==0.4.6
+
+# Dashboard & Reporting
+rich>=13.7.0
+tabulate==0.9.0
+
+# HTTP & WebSocket
+requests==2.31.0
+websocket-client==1.7.0
+
+# Database (for trade logs)
+SQLAlchemy==2.0.23
+
+# Excel Reports
+openpyxl==3.1.2
+xlsxwriter==3.1.9
+
+# Plotting (optional)
+matplotlib>=3.9.0
+
+# Timezone
+pytz==2023.3.post1

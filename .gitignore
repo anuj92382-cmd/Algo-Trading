@@ -1,0 +1,63 @@
+# ============================================================
+# Python Bytecode & Cache
+# ============================================================
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyc
+
+# ============================================================
+# Sensitive API Credentials & Secrets (CRITICAL)
+# ============================================================
+.env
+.env.*
+!.env.example
+algo_trading/.env
+algo_trading/.env.*
+!algo_trading/.env.example
+
+# ============================================================
+# Dynamic Data, Tokens & Database Files
+# ============================================================
+*.db
+*.sqlite3
+access_token.json
+paper_portfolio.json
+algo_trading/data/*
+!algo_trading/data/.gitkeep
+
+# ============================================================
+# Log Files
+# ============================================================
+*.log
+logs/
+algo_trading/logs/*
+!algo_trading/logs/.gitkeep
+
+# ============================================================
+# Trade Reports & Exports
+# ============================================================
+reports/
+algo_trading/reports/*
+!algo_trading/reports/.gitkeep
+
+# ============================================================
+# Virtual Environments
+# ============================================================
+venv/
+.venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+
+# ============================================================
+# IDE / Editor Files
+# ============================================================
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db

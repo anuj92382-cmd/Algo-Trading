@@ -1,0 +1,1083 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Algo Trading Dashboard</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+
+<!-- ═══ SIDEBAR ═══════════════════════════════════════════════ -->
+<aside class="sidebar" id="sidebar">
+    <div class="sidebar-logo">
+        <span class="logo-icon">🤖</span>
+        <span class="logo-text">AlgoBot</span>
+    </div>
+
+    <nav class="sidebar-nav">
+        <div class="nav-group-label">TRADING</div>
+        <a class="nav-item active" data-page="dashboard" onclick="showPage('dashboard')">
+            <span class="nav-icon">📊</span>
+            <span class="nav-label">Dashboard</span>
+        </a>
+        <a class="nav-item" data-page="gainers" onclick="showPage('gainers')">
+            <span class="nav-icon">🚀</span>
+            <span class="nav-label">Top Gainers</span>
+            <span class="nav-badge green" id="gainers-count">-</span>
+        </a>
+        <a class="nav-item" data-page="losers" onclick="showPage('losers')">
+            <span class="nav-icon">📉</span>
+            <span class="nav-label">Top Losers</span>
+            <span class="nav-badge red" id="losers-count">-</span>
+        </a>
+        <a class="nav-item" data-page="stocks" onclick="showPage('stocks')">
+            <span class="nav-icon">📋</span>
+            <span class="nav-label">All Stocks</span>
+            <span class="nav-badge blue" id="stocks-count">-</span>
+        </a>
+
+        <div class="nav-group-label" style="margin-top:16px">ACCOUNT</div>
+        <a class="nav-item" data-page="positions" onclick="showPage('positions')">
+            <span class="nav-icon">📈</span>
+            <span class="nav-label">Positions</span>
+            <span class="nav-badge yellow" id="pos-badge">0</span>
+        </a>
+        <a class="nav-item" data-page="trades" onclick="showPage('trades')">
+            <span class="nav-icon">📑</span>
+            <span class="nav-label">Trades</span>
+        </a>
+        <a class="nav-item" data-page="orders" onclick="showPage('orders')">
+            <span class="nav-icon">🗒️</span>
+            <span class="nav-label">Orders</span>
+        </a>
+
+        <div class="nav-group-label" style="margin-top:16px">TOOLS</div>
+        <a class="nav-item" data-page="trade" onclick="showPage('trade')">
+            <span class="nav-icon">💹</span>
+            <span class="nav-label">Trade</span>
+            <span class="nav-badge green" id="trade-badge">B/S</span>
+        </a>
+        <a class="nav-item" data-page="scanner" onclick="showPage('scanner')">
+            <span class="nav-icon">🔬</span>
+            <span class="nav-label">Stock Scanner</span>
+            <span class="nav-badge yellow" id="scanner-badge">NEW</span>
+        </a>
+        <a class="nav-item" data-page="sectors" onclick="showPage('sectors')">
+            <span class="nav-icon">🌡️</span>
+            <span class="nav-label">Sector Heatmap</span>
+        </a>
+    </nav>
+
+    <div class="sidebar-bottom">
+        <div class="user-card">
+            <div class="user-avatar">👤</div>
+            <div class="user-info-box">
+                <div class="user-name" id="sidebarUser">Loading...</div>
+                <div class="user-mode" id="sidebarMode">PAPER</div>
+            </div>
+        </div>
+        <a href="/logout" class="logout-btn">🚪 Logout</a>
+    </div>
+</aside>
+
+<!-- ═══ MAIN AREA ══════════════════════════════════════════════ -->
+<div class="main-wrapper">
+
+    <!-- TOP NAVBAR -->
+    <header class="topbar">
+        <div class="topbar-left">
+            <button class="sidebar-toggle" onclick="toggleSidebar()">☰</button>
+            <span class="page-title" id="pageTitle">Dashboard</span>
+        </div>
+        <div class="topbar-center">
+            <div class="market-pill" id="marketPill">
+                <span class="dot grey" id="mktDot"></span>
+                <span id="mktStatus">Loading...</span>
+                <span class="mkt-time" id="mktTime">--:--:--</span>
+            </div>
+        </div>
+        <div class="topbar-right">
+            <div class="pnl-pill" id="pnlPill">
+                P&L: <span id="topPnl">₹0</span>
+            </div>
+            <button id="btnStart" class="btn btn-green" onclick="botControl('start')">▶ Start</button>
+            <button id="btnStop"  class="btn btn-red"   onclick="botControl('stop')" style="display:none">⏹ Stop</button>
+        </div>
+    </header>
+
+    <!-- PAGE CONTENT -->
+    <main class="content-area">
+
+        <!-- ══ PAGE: DASHBOARD ══════════════════════════════════ -->
+        <section id="page-dashboard" class="page active">
+            <!-- Summary Cards -->
+            <div class="cards-grid">
+                <div class="stat-card">
+                    <div class="stat-icon green-bg">💰</div>
+                    <div class="stat-body">
+                        <div class="stat-label">Today P&L</div>
+                        <div class="stat-value" id="d-pnl">₹0.00</div>
+                        <div class="stat-sub" id="d-pnl-pct">0.00%</div>
+                    </div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-icon blue-bg">🏦</div>
+                    <div class="stat-body">
+                        <div class="stat-label">Capital</div>
+                        <div class="stat-value blue" id="d-capital">₹0</div>
+                        <div class="stat-sub">Available</div>
+                    </div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-icon purple-bg">📊</div>
+                    <div class="stat-body">
+                        <div class="stat-label">Trades Today</div>
+                        <div class="stat-value" id="d-trades">0</div>
+                        <div class="stat-sub">
+                            <span class="green" id="d-win">0W</span> /
+                            <span class="red"   id="d-loss">0L</span>
+                        </div>
+                    </div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-icon yellow-bg">🎯</div>
+                    <div class="stat-body">
+                        <div class="stat-label">Win Rate</div>
+                        <div class="stat-value" id="d-wr">0%</div>
+                        <div class="stat-sub">Today</div>
+                    </div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-icon cyan-bg">📈</div>
+                    <div class="stat-body">
+                        <div class="stat-label">Open Positions</div>
+                        <div class="stat-value cyan" id="d-pos">0</div>
+                        <div class="stat-sub">Active</div>
+                    </div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-icon red-bg">🛡️</div>
+                    <div class="stat-body">
+                        <div class="stat-label">Daily Loss Used</div>
+                        <div class="stat-value" id="d-loss-pct">0%</div>
+                        <div class="risk-bar">
+                            <div class="risk-fill" id="d-risk-bar" style="width:0%"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Two column: Positions + Watchlist -->
+            <div class="two-col">
+                <div class="panel">
+                    <div class="panel-header">
+                        <h3>📈 Active Positions</h3>
+                        <span class="badge blue" id="d-pos-count">0</span>
+                    </div>
+                    <div class="table-wrap">
+                        <table>
+                            <thead><tr>
+                                <th>Symbol</th><th>Type</th><th>Dir</th>
+                                <th>Qty</th><th>Entry</th><th>LTP</th>
+                                <th>P&L</th><th>SL</th><th>Target</th>
+                            </tr></thead>
+                            <tbody id="d-positions">
+                                <tr><td colspan="9" class="empty">No active positions</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+                <div class="panel">
+                    <div class="panel-header">
+                        <h3>📡 Watchlist</h3>
+                        <span class="live-dot">● LIVE</span>
+                    </div>
+                    <div class="table-wrap">
+                        <table>
+                            <thead><tr>
+                                <th>Symbol</th><th>LTP ₹</th><th>Chg%</th><th></th>
+                            </tr></thead>
+                            <tbody id="d-watchlist">
+                                <tr><td colspan="4" class="empty">Loading...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- ══ PAGE: TOP GAINERS ════════════════════════════════ -->
+        <section id="page-gainers" class="page">
+            <div class="page-header">
+                <h2>🚀 Top Gainers</h2>
+                <div class="page-actions">
+                    <span class="info-pill">₹50 - ₹20,000 range | NSE</span>
+                    <button class="btn btn-blue" onclick="loadGainersLosers()">🔄 Refresh</button>
+                </div>
+            </div>
+            <div class="panel">
+                <div class="panel-header">
+                    <h3>Top 20 Gainers - Today</h3>
+                    <span class="badge green" id="gainers-total">0 stocks</span>
+                </div>
+                <div class="table-wrap tall">
+                    <table id="gainers-table">
+                        <thead><tr>
+                            <th>#</th>
+                            <th>Symbol</th>
+                            <th>Company</th>
+                            <th>LTP ₹</th>
+                            <th>Change ₹</th>
+                            <th>Change %</th>
+                            <th>Open ₹</th>
+                            <th>High ₹</th>
+                            <th>Low ₹</th>
+                            <th>Volume</th>
+                            <th>Action</th>
+                        </tr></thead>
+                        <tbody id="gainers-body">
+                            <tr><td colspan="11" class="empty loading-msg">
+                                ⏳ Loading gainers... (market hours mein data milega)
+                            </td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </section>
+
+        <!-- ══ PAGE: TOP LOSERS ═════════════════════════════════ -->
+        <section id="page-losers" class="page">
+            <div class="page-header">
+                <h2>📉 Top Losers</h2>
+                <div class="page-actions">
+                    <span class="info-pill">₹50 - ₹20,000 range | NSE</span>
+                    <button class="btn btn-blue" onclick="loadGainersLosers()">🔄 Refresh</button>
+                </div>
+            </div>
+            <div class="panel">
+                <div class="panel-header">
+                    <h3>Top 20 Losers - Today</h3>
+                    <span class="badge red" id="losers-total">0 stocks</span>
+                </div>
+                <div class="table-wrap tall">
+                    <table id="losers-table">
+                        <thead><tr>
+                            <th>#</th>
+                            <th>Symbol</th>
+                            <th>Company</th>
+                            <th>LTP ₹</th>
+                            <th>Change ₹</th>
+                            <th>Change %</th>
+                            <th>Open ₹</th>
+                            <th>High ₹</th>
+                            <th>Low ₹</th>
+                            <th>Volume</th>
+                            <th>Action</th>
+                        </tr></thead>
+                        <tbody id="losers-body">
+                            <tr><td colspan="11" class="empty loading-msg">
+                                ⏳ Loading losers... (market hours mein data milega)
+                            </td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </section>
+
+        <!-- ══ PAGE: ALL STOCKS ═════════════════════════════════ -->
+        <section id="page-stocks" class="page">
+            <div class="page-header">
+                <h2>📋 All Stocks Screener</h2>
+                <div class="page-actions">
+                    <span class="info-pill" id="stocks-range-info">Price: ₹50 - ₹20,000</span>
+                    <button class="btn btn-blue" onclick="loadStocks()">🔄 Load</button>
+                </div>
+            </div>
+
+            <!-- Filters -->
+            <div class="filter-bar">
+                <div class="filter-group">
+                    <label>Min Price ₹</label>
+                    <input type="number" id="f-min" value="50" min="1" max="19999">
+                </div>
+                <div class="filter-group">
+                    <label>Max Price ₹</label>
+                    <input type="number" id="f-max" value="20000" min="51">
+                </div>
+                <div class="filter-group">
+                    <label>Sort By</label>
+                    <select id="f-sort">
+                        <option value="chg_desc">% Change ↓</option>
+                        <option value="chg_asc">% Change ↑</option>
+                        <option value="price_asc">Price ↑</option>
+                        <option value="price_desc">Price ↓</option>
+                        <option value="volume_desc">Volume ↓</option>
+                    </select>
+                </div>
+                <div class="filter-group">
+                    <label>Search</label>
+                    <input type="text" id="f-search" placeholder="Symbol ya name... (Enter dabao)" 
+                           oninput="filterStocksTable()"
+                           onkeydown="if(event.key==='Enter') loadStocks()">
+                </div>
+                <button class="btn btn-green" onclick="loadStocks()">🔍 Search / Apply</button>
+            </div>
+
+            <div class="panel">
+                <div class="panel-header">
+                    <h3>NSE Stocks</h3>
+                    <span class="badge blue" id="stocks-total">0 stocks</span>
+                </div>
+                <div class="table-wrap tall">
+                    <table id="stocks-table">
+                        <thead><tr>
+                            <th>#</th>
+                            <th>Symbol</th>
+                            <th>Company</th>
+                            <th>Prev Close ₹</th>
+                            <th>LTP ₹</th>
+                            <th>Change ₹</th>
+                            <th>Change %</th>
+                            <th>Open ₹</th>
+                            <th>High ₹</th>
+                            <th>Low ₹</th>
+                            <th>Volume</th>
+                            <th>Action</th>
+                        </tr></thead>
+                        <tbody id="stocks-body">
+                            <tr><td colspan="12" class="empty">
+                                "Load" button click karo stocks dekhne ke liye
+                            </td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </section>
+
+        <!-- ══ PAGE: POSITIONS ══════════════════════════════════ -->
+        <section id="page-positions" class="page">
+            <div class="page-header">
+                <h2>📈 Active Positions</h2>
+                <div class="page-actions">
+                    <button class="btn btn-blue" onclick="fetchPositions()">🔄 Refresh</button>
+                </div>
+            </div>
+            <div class="panel">
+                <div class="panel-header">
+                    <h3>Open Positions</h3>
+                    <span class="badge blue" id="pos-total">0</span>
+                </div>
+                <div class="table-wrap tall">
+                    <table>
+                        <thead><tr>
+                            <th>Symbol</th><th>Strategy</th><th>Direction</th>
+                            <th>Qty</th><th>Entry ₹</th><th>LTP ₹</th>
+                            <th>P&L ₹</th><th>P&L %</th>
+                            <th>Stop Loss ₹</th><th>Target ₹</th>
+                        </tr></thead>
+                        <tbody id="pos-body">
+                            <tr><td colspan="10" class="empty">No active positions</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </section>
+
+        <!-- ══ PAGE: TRADES ═════════════════════════════════════ -->
+        <section id="page-trades" class="page">
+            <div class="page-header">
+                <h2>📑 Today's Trades</h2>
+            </div>
+            <div class="panel">
+                <div class="panel-header">
+                    <h3>Trade History</h3>
+                    <span class="badge grey" id="trades-total">0 trades</span>
+                </div>
+                <div class="table-wrap tall">
+                    <table>
+                        <thead><tr>
+                            <th>Time</th><th>Symbol</th><th>Strategy</th>
+                            <th>Dir</th><th>Qty</th>
+                            <th>Entry ₹</th><th>Exit ₹</th>
+                            <th>P&L ₹</th><th>P&L %</th>
+                            <th>Result</th><th>Reason</th>
+                        </tr></thead>
+                        <tbody id="trades-body">
+                            <tr><td colspan="11" class="empty">No trades today</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </section>
+
+        <!-- ══ PAGE: ORDERS ═════════════════════════════════════ -->
+        <section id="page-orders" class="page">
+            <div class="page-header">
+                <h2>🗒️ Orders</h2>
+            </div>
+            <div class="panel">
+                <div class="panel-header">
+                    <h3>Today's Orders</h3>
+                    <span class="badge grey" id="orders-total">0</span>
+                </div>
+                <div class="table-wrap tall">
+                    <table>
+                        <thead><tr>
+                            <th>Order ID</th><th>Symbol</th><th>Type</th>
+                            <th>Dir</th><th>Qty</th><th>Price ₹</th>
+                            <th>Product</th><th>Status</th><th>Tag</th>
+                        </tr></thead>
+                        <tbody id="orders-body">
+                            <tr><td colspan="9" class="empty">No orders</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </section>
+
+        <!-- ══ PAGE: SCANNER ════════════════════════════════════ -->
+        <section id="page-scanner" class="page">
+            <div class="page-header">
+                <h2>🔬 Stock Scanner</h2>
+                <div class="page-actions">
+                    <span class="badge yellow" id="sc-result-count">0 signals</span>
+                    <span class="info-pill" id="sc-last-scan">Never scanned</span>
+                </div>
+            </div>
+
+            <!-- Scanner Controls -->
+            <div class="sc-controls">
+                <div class="sc-control-row">
+                    <!-- Universe - dynamically loaded -->
+                    <div class="sc-field">
+                        <label>Stock Universe / Index <span id="sc-universe-hint" style="font-size:11px;color:var(--text3);margin-left:6px"></span></label>
+                        <select id="sc-universe" onchange="onUniverseChange()">
+                            <optgroup label="── 🌐 All Market ──">
+                                <option value="all_stocks">🌐 All Stocks (All NSE EQ - Complete Scan)</option>
+                                <option value="nifty500">📊 Nifty 500 (Top 500 Stocks)</option>
+                                <option value="all_sectors">🌐 All Sectors Combined (~200 stocks)</option>
+                            </optgroup>
+                            <optgroup label="── NSE Indices ──">
+                                <option value="nifty50">🔵 Nifty 50 (50 stocks)</option>
+                                <option value="nifty_next50">🔵 Nifty Next 50</option>
+                                <option value="nifty100">🔵 Nifty 100</option>
+                                <option value="nifty200">📈 Nifty 200</option>
+                                <option value="banknifty">🏦 Bank Nifty (15 stocks)</option>
+                                <option value="finnifty">💰 Fin Nifty (20 stocks)</option>
+                            </optgroup>
+                            <optgroup label="── NSE Midcap / Smallcap ──">
+                                <option value="nifty_midcap50">📊 Nifty Midcap 50</option>
+                                <option value="nifty_midcap150">📊 Nifty Midcap 150</option>
+                                <option value="nifty_smallcap100">📉 Nifty Smallcap 100</option>
+                            </optgroup>
+                            <optgroup label="── BSE Indices ──">
+                                <option value="sensex30">🟠 Sensex 30</option>
+                                <option value="bse100">🟠 BSE 100</option>
+                            </optgroup>
+                            <optgroup label="── Sector-wise ──" id="sector-optgroup">
+                                <option value="it_technology">💻 IT & Technology</option>
+                                <option value="banking">🏦 Banking</option>
+                                <option value="financial_services">💰 Financial Services</option>
+                                <option value="auto_ev">🚗 Auto & EV</option>
+                                <option value="pharma_healthcare">💊 Pharma & Healthcare</option>
+                                <option value="fmcg_consumer">🛒 FMCG & Consumer</option>
+                                <option value="oil_gas_energy">⛽ Oil, Gas & Energy</option>
+                                <option value="metals_mining">⚙️ Metals & Mining</option>
+                                <option value="real_estate">🏠 Real Estate</option>
+                                <option value="infra_capital_goods">🏗️ Infra & Capital Goods</option>
+                                <option value="cement">🪨 Cement</option>
+                                <option value="telecom">📡 Telecom</option>
+                                <option value="chemicals">🧪 Chemicals</option>
+                                <option value="defence">🛡️ Defence</option>
+                                <option value="new_age_tech">🚀 New Age & Tech</option>
+                            </optgroup>
+                            <optgroup label="── Custom ──">
+                                <option value="watchlist">⭐ My Watchlist</option>
+                                <option value="all_sectors">🌐 All Sectors Combined</option>
+                                <option value="custom">✏️ Custom Symbols</option>
+                            </optgroup>
+                        </select>
+                    </div>
+                    <!-- Timeframe -->
+                    <div class="sc-field">
+                        <label>Timeframe</label>
+                        <select id="sc-timeframe">
+                            <option value="day">Daily (Swing)</option>
+                            <option value="60minute">60 Min (Short-term)</option>
+                            <option value="15minute">15 Min (Intraday)</option>
+                            <option value="5minute">5 Min (Intraday)</option>
+                        </select>
+                    </div>
+                    <!-- Direction -->
+                    <div class="sc-field">
+                        <label>Direction</label>
+                        <select id="sc-direction">
+                            <option value="both">Both (Long + Short)</option>
+                            <option value="long">Long Only (Buy)</option>
+                            <option value="short">Short Only (Sell)</option>
+                        </select>
+                    </div>
+                    <!-- Min Score -->
+                    <div class="sc-field">
+                        <label>Min Score (Max 10)</label>
+                        <select id="sc-minscore">
+                            <option value="7">7+ (High confidence)</option>
+                            <option value="6" selected>6+ (Medium confidence)</option>
+                            <option value="5">5+ (Show more)</option>
+                        </select>
+                    </div>
+                    <!-- Quick analyse -->
+                    <div class="sc-field">
+                        <label>Quick Symbol Check</label>
+                        <div style="display:flex;gap:6px">
+                            <input type="text" id="sc-quick-sym"
+                                   placeholder="e.g. RELIANCE"
+                                   style="flex:1"
+                                   onkeydown="if(event.key==='Enter') quickAnalyse()">
+                            <button class="btn btn-blue" onclick="quickAnalyse()">⚡ Check</button>
+                        </div>
+                    </div>
+                </div>
+                <!-- Custom symbols -->
+                <div id="sc-custom-row" style="display:none" class="sc-custom-row">
+                    <label>Custom Symbols (comma separated)</label>
+                    <input type="text" id="sc-custom-syms"
+                           placeholder="RELIANCE,TCS,INFY,HDFC,ICICIBANK..."
+                           style="width:100%">
+                </div>
+                <!-- Action buttons -->
+                <div class="sc-action-row">
+                    <button class="btn-scan" id="sc-run-btn" onclick="runScanner()">
+                        🔬 Start Scanner
+                    </button>
+                    <button class="btn btn-red" onclick="stopScanner()" id="sc-stop-btn" style="display:none">
+                        ⏹ Cancel Scan
+                    </button>
+                    <div class="sc-progress-wrap" id="sc-progress-wrap" style="display:none">
+                        <div class="sc-progress-bar">
+                            <div class="sc-progress-fill" id="sc-progress-fill"></div>
+                        </div>
+                        <div class="sc-progress-info">
+                            <span id="sc-progress-text" class="sc-progress-pct">0%</span>
+                            <span id="sc-progress-count" class="sc-progress-count">0/0</span>
+                            <span id="sc-progress-sym" class="sc-current-sym"></span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Results Summary Bar -->
+            <div class="sc-summary" id="sc-summary" style="display:none">
+                <div class="sc-sum-item">
+                    <span class="sc-sum-val green" id="sc-long-count">0</span>
+                    <span class="sc-sum-lbl">Long Signals</span>
+                </div>
+                <div class="sc-sum-item">
+                    <span class="sc-sum-val red" id="sc-short-count">0</span>
+                    <span class="sc-sum-lbl">Short Signals</span>
+                </div>
+                <div class="sc-sum-item">
+                    <span class="sc-sum-val yellow" id="sc-strong-count">0</span>
+                    <span class="sc-sum-lbl">Strong Signals (8+)</span>
+                </div>
+                <div class="sc-sum-item">
+                    <span class="sc-sum-val blue" id="sc-scanned-count">0</span>
+                    <span class="sc-sum-lbl">Stocks Scanned</span>
+                </div>
+            </div>
+
+            <!-- Filter bar for results -->
+            <div class="sc-filter-bar" id="sc-filter-bar" style="display:none">
+                <span style="color:var(--text2);font-size:12px">Filter:</span>
+                <button class="sc-filter-btn active" data-f="all"     onclick="filterResults('all')">All</button>
+                <button class="sc-filter-btn"        data-f="long"    onclick="filterResults('long')">📈 Long</button>
+                <button class="sc-filter-btn"        data-f="short"   onclick="filterResults('short')">📉 Short</button>
+                <button class="sc-filter-btn"        data-f="strong"  onclick="filterResults('strong')">🔥 Strong (8+)</button>
+                <button class="sc-filter-btn"        data-f="rr3"     onclick="filterResults('rr3')">🎯 1:3 R:R</button>
+                <input type="text" id="sc-filter-search"
+                       placeholder="Search symbol..."
+                       oninput="filterResults('search')"
+                       style="margin-left:auto;padding:5px 10px;background:var(--bg3);border:1px solid var(--border);color:var(--text);border-radius:6px;font-size:12px">
+            </div>
+
+            <!-- Results Grid -->
+            <div id="sc-results-grid" class="sc-results-grid"></div>
+
+            <!-- Quick Order Modal -->
+            <div id="sc-qo-modal" class="sc-qo-modal" style="display:none">
+                <div class="sc-qo-box">
+                    <div class="sc-qo-header-bar">
+                        <h3 id="sc-qo-title">Quick Order</h3>
+                        <button class="sc-modal-close" onclick="closeQuickOrder()">✕</button>
+                    </div>
+                    <div id="sc-qo-body"></div>
+                </div>
+            </div>
+
+            <!-- Quick Analyse Modal -->
+            <div id="sc-modal" class="sc-modal" style="display:none">
+                <div class="sc-modal-box">
+                    <div class="sc-modal-header">
+                        <h3 id="sc-modal-title">Analysis</h3>
+                        <button onclick="closeModal()" class="sc-modal-close">✕</button>
+                    </div>
+                    <div id="sc-modal-body"></div>
+                </div>
+            </div>
+
+        </section>
+
+        <!-- ══ PAGE: TRADE ═════════════════════════════════════ -->
+        <section id="page-trade" class="page">
+
+            <!-- Top: Funds bar -->
+            <div class="trade-funds-bar">
+                <div class="fund-item">
+                    <span class="fund-lbl">💰 Available Cash</span>
+                    <span class="fund-val green" id="tr-available">--</span>
+                </div>
+                <div class="fund-item">
+                    <span class="fund-lbl">📊 Used Margin</span>
+                    <span class="fund-val yellow" id="tr-used">--</span>
+                </div>
+                <div class="fund-item">
+                    <span class="fund-lbl">🏦 Net Balance</span>
+                    <span class="fund-val blue" id="tr-net">--</span>
+                </div>
+                <div class="fund-item">
+                    <span class="fund-lbl">📈 Today P&L</span>
+                    <span class="fund-val" id="tr-pnl">₹0</span>
+                </div>
+                <div class="fund-item" style="margin-left:auto">
+                    <button class="btn btn-grey" onclick="loadFunds()">🔄 Refresh</button>
+                    <button class="btn btn-red" style="margin-left:8px"
+                            onclick="confirmSquareoffAll()">⚡ Square Off All</button>
+                </div>
+            </div>
+
+            <!-- Paper mode warning -->
+            <div id="tr-paper-warn" class="tr-paper-warn" style="display:none">
+                📄 <b>PAPER TRADING MODE</b> — Koi real order nahi jayega. .env mein
+                <code>TRADING_MODE=LIVE</code> karo real trading ke liye.
+            </div>
+
+            <div class="trade-main-grid">
+
+                <!-- LEFT: Order Form -->
+                <div class="trade-form-panel">
+                    <div class="trade-tabs">
+                        <button class="trade-tab buy-tab active" id="tab-buy"
+                                onclick="setTradeTab('BUY')">📈 BUY</button>
+                        <button class="trade-tab sell-tab" id="tab-sell"
+                                onclick="setTradeTab('SELL')">📉 SELL</button>
+                    </div>
+
+                    <!-- Symbol search -->
+                    <div class="tr-field">
+                        <label>Symbol</label>
+                        <div class="tr-sym-row">
+                            <input type="text" id="tr-symbol"
+                                   placeholder="e.g. RELIANCE, TCS, INFY"
+                                   autocomplete="off"
+                                   oninput="onSymbolInput()"
+                                   onkeydown="if(event.key==='Enter') fetchQuote()">
+                            <button class="btn btn-blue" onclick="fetchQuote()">
+                                🔍 Get Quote
+                            </button>
+                        </div>
+                        <!-- Live quote display -->
+                        <div id="tr-quote-box" class="tr-quote-box" style="display:none">
+                            <div class="tr-quote-left">
+                                <span class="tr-quote-sym" id="tr-q-sym">--</span>
+                                <span class="tr-quote-ltp" id="tr-q-ltp">₹0</span>
+                            </div>
+                            <div class="tr-quote-right">
+                                <span id="tr-q-chg">0%</span>
+                                <span class="tr-quote-sub" id="tr-q-ohlc">O:0 H:0 L:0</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Exchange + Product -->
+                    <div class="tr-row-2">
+                        <div class="tr-field">
+                            <label>Exchange</label>
+                            <select id="tr-exchange">
+                                <option value="NSE">NSE</option>
+                                <option value="BSE">BSE</option>
+                                <option value="NFO">NFO (F&O)</option>
+                                <option value="MCX">MCX</option>
+                            </select>
+                        </div>
+                        <div class="tr-field">
+                            <label>Product</label>
+                            <select id="tr-product" onchange="onProductChange()">
+                                <option value="MIS">MIS (Intraday)</option>
+                                <option value="CNC">CNC (Delivery)</option>
+                                <option value="NRML">NRML (F&O)</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <!-- Order Type -->
+                    <div class="tr-field">
+                        <label>Order Type</label>
+                        <div class="tr-order-types">
+                            <button class="tr-ot-btn active" data-ot="MARKET"
+                                    onclick="setOrderType('MARKET')">MARKET</button>
+                            <button class="tr-ot-btn" data-ot="LIMIT"
+                                    onclick="setOrderType('LIMIT')">LIMIT</button>
+                            <button class="tr-ot-btn" data-ot="SL"
+                                    onclick="setOrderType('SL')">SL</button>
+                            <button class="tr-ot-btn" data-ot="SL-M"
+                                    onclick="setOrderType('SL-M')">SL-M</button>
+                        </div>
+                    </div>
+
+                    <!-- Quantity + Price -->
+                    <div class="tr-row-2">
+                        <div class="tr-field">
+                            <label>Quantity</label>
+                            <input type="number" id="tr-qty" placeholder="0"
+                                   min="1" value="1"
+                                   oninput="calcOrderValue()">
+                        </div>
+                        <div class="tr-field" id="tr-price-field">
+                            <label>Price ₹ <span id="tr-price-lbl">(Market)</span></label>
+                            <input type="number" id="tr-price" placeholder="0.00"
+                                   step="0.05" disabled
+                                   oninput="calcOrderValue()">
+                        </div>
+                    </div>
+
+                    <!-- Trigger Price (SL only) -->
+                    <div class="tr-field" id="tr-trigger-field" style="display:none">
+                        <label>Trigger Price ₹</label>
+                        <input type="number" id="tr-trigger" placeholder="0.00" step="0.05">
+                    </div>
+
+                    <!-- SL + Target (optional) -->
+                    <div class="tr-sl-target-row">
+                        <div class="tr-field">
+                            <label>Stop Loss ₹ <span class="dim">(optional)</span></label>
+                            <input type="number" id="tr-sl" placeholder="0.00"
+                                   step="0.05" oninput="calcRR()">
+                        </div>
+                        <div class="tr-field">
+                            <label>Target ₹ <span class="dim">(optional)</span></label>
+                            <input type="number" id="tr-target" placeholder="0.00"
+                                   step="0.05" oninput="calcRR()">
+                        </div>
+                    </div>
+
+                    <!-- R:R display -->
+                    <div id="tr-rr-display" class="tr-rr-display" style="display:none">
+                        <span id="tr-rr-text">R:R = --</span>
+                        <span id="tr-risk-text" class="dim"></span>
+                        <span id="tr-reward-text" class="dim"></span>
+                    </div>
+
+                    <!-- Order Value -->
+                    <div class="tr-value-row">
+                        <span class="dim">Est. Order Value:</span>
+                        <span id="tr-order-val" class="tr-order-val">₹0</span>
+                    </div>
+
+                    <!-- Submit Button -->
+                    <button class="tr-submit-btn buy" id="tr-submit-btn"
+                            onclick="submitOrder()">
+                        📈 BUY
+                    </button>
+                </div>
+
+                <!-- RIGHT: Positions + Holdings -->
+                <div class="trade-right-panel">
+
+                    <!-- Live Positions -->
+                    <div class="panel" style="margin-bottom:12px">
+                        <div class="panel-header">
+                            <h3>📊 Live Positions</h3>
+                            <div style="display:flex;gap:8px;align-items:center">
+                                <span class="badge blue" id="tr-pos-count">0</span>
+                                <button class="btn btn-grey" style="padding:4px 10px;font-size:11px"
+                                        onclick="loadTradePositions()">🔄</button>
+                            </div>
+                        </div>
+                        <div class="table-wrap" style="max-height:220px">
+                            <table>
+                                <thead><tr>
+                                    <th>Symbol</th><th>Qty</th><th>Avg ₹</th>
+                                    <th>LTP ₹</th><th>P&L ₹</th><th>Product</th><th>Action</th>
+                                </tr></thead>
+                                <tbody id="tr-positions-body">
+                                    <tr><td colspan="7" class="empty">No open positions</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <!-- Holdings (CNC) -->
+                    <div class="panel" style="margin-bottom:12px">
+                        <div class="panel-header">
+                            <h3>🏦 Holdings (CNC)</h3>
+                            <span class="badge blue" id="tr-hold-count">0</span>
+                        </div>
+                        <div class="table-wrap" style="max-height:200px">
+                            <table>
+                                <thead><tr>
+                                    <th>Symbol</th><th>Qty</th><th>Avg ₹</th>
+                                    <th>LTP ₹</th><th>P&L ₹</th><th>P&L%</th><th>Action</th>
+                                </tr></thead>
+                                <tbody id="tr-holdings-body">
+                                    <tr><td colspan="7" class="empty">No holdings</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <!-- Today Orders -->
+                    <div class="panel">
+                        <div class="panel-header">
+                            <h3>📋 Today's Orders</h3>
+                            <span class="badge grey" id="tr-ord-count">0</span>
+                        </div>
+                        <div class="table-wrap" style="max-height:180px">
+                            <table>
+                                <thead><tr>
+                                    <th>Symbol</th><th>Type</th><th>Qty</th>
+                                    <th>Price</th><th>Status</th><th>Time</th>
+                                </tr></thead>
+                                <tbody id="tr-orders-body">
+                                    <tr><td colspan="6" class="empty">No orders today</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                </div>
+            </div>
+
+            <!-- Confirm Order Modal -->
+            <div id="tr-confirm-modal" class="tr-modal" style="display:none">
+                <div class="tr-modal-box">
+                    <div class="tr-modal-header">
+                        <h3 id="tr-modal-title">Confirm Order</h3>
+                        <button class="sc-modal-close" onclick="closeTradeModal()">✕</button>
+                    </div>
+                    <div id="tr-modal-body" class="tr-modal-body"></div>
+                    <div class="tr-modal-footer">
+                        <button class="btn btn-grey" onclick="closeTradeModal()">Cancel</button>
+                        <button class="tr-confirm-btn" id="tr-confirm-btn"
+                                onclick="confirmOrder()">
+                            Confirm & Place Order
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ══════════════════════════════════════════════════
+                 PAPER TRADING PORTFOLIO
+            ═══════════════════════════════════════════════════ -->
+            <div id="paper-portfolio" class="paper-portfolio" style="display:none">
+                
+                <div class="paper-header">
+                    <h2>📄 Paper Trading Portfolio</h2>
+                    <div class="paper-header-actions">
+                        <span class="paper-badge">PAPER MODE</span>
+                        <button class="btn btn-grey" onclick="loadPaperPortfolio()">🔄 Refresh</button>
+                        <button class="btn btn-red" onclick="resetPaperPortfolio()">🗑️ Reset</button>
+                    </div>
+                </div>
+
+                <!-- Summary cards -->
+                <div class="paper-summary">
+                    <div class="paper-sum-card">
+                        <div class="paper-sum-lbl">Total P&L</div>
+                        <div class="paper-sum-val" id="paper-total-pnl">₹0</div>
+                        <div class="paper-sum-sub" id="paper-total-pct">0%</div>
+                    </div>
+                    <div class="paper-sum-card">
+                        <div class="paper-sum-lbl">Invested</div>
+                        <div class="paper-sum-val" id="paper-invested">₹0</div>
+                    </div>
+                    <div class="paper-sum-card">
+                        <div class="paper-sum-lbl">Closed P&L</div>
+                        <div class="paper-sum-val" id="paper-closed-pnl">₹0</div>
+                    </div>
+                    <div class="paper-sum-card">
+                        <div class="paper-sum-lbl">Open Positions</div>
+                        <div class="paper-sum-val" id="paper-pos-count">0</div>
+                    </div>
+                </div>
+
+                <!-- Tabs: Positions / Orders -->
+                <div class="paper-tabs">
+                    <button class="paper-tab active" data-tab="positions"
+                            onclick="switchPaperTab('positions')">
+                        📊 Open Positions
+                    </button>
+                    <button class="paper-tab" data-tab="orders"
+                            onclick="switchPaperTab('orders')">
+                        📋 Order History
+                    </button>
+                </div>
+
+                <!-- Positions Table -->
+                <div id="paper-positions-tab" class="paper-tab-content">
+                    <div class="table-wrap">
+                        <table class="paper-table">
+                            <thead><tr>
+                                <th>Symbol</th>
+                                <th>Qty</th>
+                                <th>Avg ₹</th>
+                                <th>LTP ₹</th>
+                                <th>P&L ₹</th>
+                                <th>P&L %</th>
+                                <th>Product</th>
+                                <th>Entry Time</th>
+                                <th>SL ₹</th>
+                                <th>Target ₹</th>
+                                <th>Action</th>
+                            </tr></thead>
+                            <tbody id="paper-positions-body">
+                                <tr><td colspan="11" class="empty">
+                                    Koi open position nahi hai. Scanner se trade karo!
+                                </td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- Orders History Table -->
+                <div id="paper-orders-tab" class="paper-tab-content" style="display:none">
+                    <div class="table-wrap">
+                        <table class="paper-table">
+                            <thead><tr>
+                                <th>Order ID</th>
+                                <th>Symbol</th>
+                                <th>Type</th>
+                                <th>Qty</th>
+                                <th>Price ₹</th>
+                                <th>Order Type</th>
+                                <th>Product</th>
+                                <th>Tag</th>
+                                <th>Time</th>
+                                <th>Status</th>
+                            </tr></thead>
+                            <tbody id="paper-orders-body">
+                                <tr><td colspan="10" class="empty">
+                                    Koi order nahi hai abhi tak
+                                </td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+            </div>
+
+        </section>
+        <section id="page-sectors" class="page">
+            <div class="page-header">
+                <h2>🌡️ Sector Heatmap</h2>
+                <div class="page-actions">
+                    <span class="info-pill" id="hm-timestamp">--</span>
+                    <button class="btn btn-blue" onclick="loadHeatmap()">🔄 Refresh</button>
+                </div>
+            </div>
+
+            <!-- Summary pills -->
+            <div class="hm-summary">
+                <div class="hm-sum-item bull">
+                    <span class="hm-sum-val green" id="hm-bull-count">0</span>
+                    <span class="hm-sum-lbl">Bullish Sectors 🟢</span>
+                </div>
+                <div class="hm-sum-item bear">
+                    <span class="hm-sum-val red" id="hm-bear-count">0</span>
+                    <span class="hm-sum-lbl">Bearish Sectors 🔴</span>
+                </div>
+                <div class="hm-sum-item neut">
+                    <span class="hm-sum-val yellow" id="hm-neut-count">0</span>
+                    <span class="hm-sum-lbl">Neutral ⚪</span>
+                </div>
+                <div class="hm-sum-item best">
+                    <span class="hm-sum-val green" id="hm-best-sector">--</span>
+                    <span class="hm-sum-lbl">🏆 Best Sector</span>
+                </div>
+                <div class="hm-sum-item worst">
+                    <span class="hm-sum-val red" id="hm-worst-sector">--</span>
+                    <span class="hm-sum-lbl">⚠️ Worst Sector</span>
+                </div>
+            </div>
+
+            <!-- Heatmap grid -->
+            <div class="hm-sort-bar">
+                <label>Sort:</label>
+                <button class="hm-sort-btn active" onclick="sortHeatmap('bull')">🟢 Bullish First</button>
+                <button class="hm-sort-btn" onclick="sortHeatmap('bear')">🔴 Bearish First</button>
+                <button class="hm-sort-btn" onclick="sortHeatmap('ratio')">📊 Up Ratio</button>
+                <button class="hm-sort-btn" onclick="sortHeatmap('name')">🔤 A-Z</button>
+            </div>
+            <div id="hm-grid" class="hm-grid">
+                <div class="hm-loading">
+                    🔄 Click "Refresh" to load sector data<br>
+                    <small style="color:var(--text3);font-size:12px">
+                        Market hours mein live data milega (Connect plan required)
+                    </small>
+                </div>
+            </div>
+
+            <!-- Sector stocks detail -->
+            <div id="hm-detail" class="hm-detail" style="display:none">
+                <div class="panel">
+                    <div class="panel-header">
+                        <h3 id="hm-detail-title">Sector Stocks</h3>
+                        <button class="btn btn-grey" onclick="closeHmDetail()">✕ Close</button>
+                    </div>
+                    <div class="table-wrap">
+                        <table>
+                            <thead><tr>
+                                <th>Symbol</th>
+                                <th>LTP ₹</th>
+                                <th>Change %</th>
+                                <th>Open ₹</th>
+                                <th>High ₹</th>
+                                <th>Low ₹</th>
+                                <th>Volume</th>
+                                <th>Action</th>
+                            </tr></thead>
+                            <tbody id="hm-detail-body">
+                                <tr><td colspan="8" class="empty">Loading...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+    </main><!-- /content-area -->
+
+    <!-- STATUS BAR -->
+    <footer class="statusbar">
+        <span id="bot-status-txt" class="red">● Bot Stopped</span>
+        <span class="sep">|</span>
+        <span id="last-update">--</span>
+        <span class="sep">|</span>
+        <span>Refresh: <span id="countdown">5</span>s</span>
+        <span class="sep">|</span>
+        <span id="halt-alert" style="display:none" class="red blink">🛑 TRADING HALTED</span>
+    </footer>
+
+</div><!-- /main-wrapper -->
+
+<!-- Toast -->
+<div id="toast" class="toast"></div>
+
+<script src="/static/js/app.js?v=2"></script>
+<script src="/static/js/market.js?v=2"></script>
+<script src="/static/js/scanner.js?v=2"></script>
+<script src="/static/js/heatmap.js?v=2"></script>
+<script src="/static/js/trade.js?v=2"></script>
+<script src="/static/js/paper.js?v=2"></script>
+</body>
+</html>

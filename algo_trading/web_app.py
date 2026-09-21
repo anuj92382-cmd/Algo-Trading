@@ -1,0 +1,1905 @@
+"""
+web_app.py - Flask Web Server for Algo Trading Bot
+"""
+
+import os
+import sys
+import json
+import logging
+import threading
+from datetime import datetime, date
+from pathlib import Path
+
+# ── SSL Fix - sabse pehle ────────────────────────────────────
+try:
+    import certifi
+    os.environ["SSL_CERT_FILE"]      = certifi.where()
+    os.environ["REQUESTS_CA_BUNDLE"] = certifi.where()
+
+    import requests as _req
+    _orig_send = _req.Session.send
+    def _ssl_patched_send(self, request, **kwargs):
+        kwargs.setdefault("verify", certifi.where())
+        return _orig_send(self, request, **kwargs)
+    _req.Session.send = _ssl_patched_send
+except Exception as _ssl_err:
+    print(f"SSL patch warning: {_ssl_err}")
+# ─────────────────────────────────────────────────────────────
+
+from flask import Flask, render_template, request, jsonify, redirect, url_for, session
+import pytz
+
+from utils.logger import setup_logger
+from config import (
+    KITE_API_KEY, KITE_API_SECRET, KITE_USER_ID,
+    TOTAL_CAPITAL, IS_PAPER_TRADING, TRADING_MODE,
+    INTRADAY_CONFIG, SWING_CONFIG, MAX_DAILY_LOSS_AMOUNT,
+    validate_config,
+)
+from order_manager import PaperPortfolio
+
+logger = logging.getLogger(__name__)
+IST_tz = pytz.timezone("Asia/Kolkata")
+
+app = Flask(__name__)
+app.secret_key = "algo_trading_secret_key_2024"
+
+# ── Global bot state ─────────────────────────────────────────
+_state = {
+    "kite":            None,
+    "data":            None,
+    "order_mgr":       None,
+    "risk_mgr":        None,
+    "intraday_strat":  None,
+    "swing_strat":     None,
+    "ticker":          None,
+    "bot_running":     False,
+    "logged_in":       False,
+    "user_name":       "",
+    "user_id":         "",
+    "error":           "",
+    "paper_portfolio": None,  # Paper trading portfolio tracker
+}
+
+# Initialize paper portfolio if in paper mode
+if IS_PAPER_TRADING:
+    _state["paper_portfolio"] = PaperPortfolio()
+    logger.info("📄 Paper Portfolio initialized")
+
+TOKEN_FILE = Path("data/access_token.json")
+
+
+# ─────────────────────────────────────────────────────────────
+# TOKEN HELPERS
+# ─────────────────────────────────────────────────────────────
+
+def _save_token(access_token: str, user_id: str, user_name: str):
+    """Token JSON file mein save karo"""
+    TOKEN_FILE.parent.mkdir(parents=True, exist_ok=True)
+    with open(TOKEN_FILE, "w") as f:
+        json.dump({
+            "access_token": access_token,
+            "user_id":      user_id,
+            "user_name":    user_name,
+            "date":         date.today().isoformat(),
+        }, f, indent=2)
+    logger.info(f"Token saved for {user_name}")
+
+
+def _load_token() -> dict:
+    """Aaj ka valid token load karo, nahi toh empty dict"""
+    try:
+        if not TOKEN_FILE.exists():
+            return {}
+        with open(TOKEN_FILE) as f:
+            data = json.load(f)
+        if data.get("date") != date.today().isoformat():
+            logger.info("Token purana hai (aaj ka nahi)")
+            return {}
+        return data
+    except Exception as e:
+        logger.warning(f"Token load error: {e}")
+        return {}
+
+
+def _init_modules(kite, user_name: str = "", user_id: str = ""):
+    """Saare trading modules ek baar initialize karo"""
+    from data import DataFetcher
+    from order_manager import OrderManager
+    from risk_manager import RiskManager
+    from strategies.intraday import IntradayStrategy
+    from strategies.swing import SwingStrategy
+
+    _state["kite"]           = kite
+    _state["data"]           = DataFetcher(kite)
+    _state["order_mgr"]      = OrderManager(kite)
+    _state["risk_mgr"]       = RiskManager(TOTAL_CAPITAL)
+    _state["intraday_strat"] = IntradayStrategy()
+    _state["swing_strat"]    = SwingStrategy()
+    _state["logged_in"]      = True
+    _state["user_name"]      = user_name
+    _state["user_id"]        = user_id
+    _state["error"]          = ""
+    logger.info(f"✅ Modules initialized | User: {user_name} ({user_id})")
+
+
+def _try_auto_login() -> bool:
+    """Saved token se auto login try karo"""
+    token_data = _load_token()
+    if not token_data:
+        return False
+
+    access_token = token_data.get("access_token", "")
+    if not access_token:
+        return False
+
+    try:
+        from kiteconnect import KiteConnect
+        kite = KiteConnect(api_key=KITE_API_KEY)
+        kite.set_access_token(access_token)
+
+        # Token verify karo
+        profile = kite.profile()
+        user_name = profile.get("user_name", token_data.get("user_name", ""))
+        user_id   = profile.get("user_id",   token_data.get("user_id", ""))
+
+        _init_modules(kite, user_name, user_id)
+        logger.info(f"✅ Auto-login successful: {user_name}")
+        return True
+
+    except Exception as e:
+        logger.warning(f"Auto-login failed: {e}")
+        # Token invalid hai - delete karo
+        try:
+            TOKEN_FILE.unlink(missing_ok=True)
+        except Exception:
+            pass
+        return False
+
+
+# ─────────────────────────────────────────────────────────────
+# ROUTES - PAGES
+# ─────────────────────────────────────────────────────────────
+
+@app.route("/")
+def index():
+    # Already logged in?
+    if _state["logged_in"]:
+        return render_template("index.html",
+            trading_mode=TRADING_MODE,
+            capital=TOTAL_CAPITAL,
+            is_paper=IS_PAPER_TRADING,
+            user_name=_state["user_name"],
+        )
+
+    # Saved token se try karo
+    if _try_auto_login():
+        return render_template("index.html",
+            trading_mode=TRADING_MODE,
+            capital=TOTAL_CAPITAL,
+            is_paper=IS_PAPER_TRADING,
+            user_name=_state["user_name"],
+        )
+
+    return redirect(url_for("login_page"))
+
+
+@app.route("/login")
+def login_page():
+    if _state["logged_in"]:
+        return redirect(url_for("index"))
+
+    login_url = _get_login_url()
+
+    return render_template("login.html",
+        login_url=login_url,
+        api_key=KITE_API_KEY,
+        error=_state.get("error", ""),
+    )
+
+
+@app.route("/callback")
+def zerodha_callback():
+    """
+    Zerodha login ke baad yahan redirect hota hai.
+    URL se request_token automatically capture karo.
+    Example: http://localhost:5000/callback?request_token=xxx&action=login&status=success
+    """
+    req_token = request.args.get("request_token", "")
+    status    = request.args.get("status", "")
+    action    = request.args.get("action", "")
+
+    logger.info(f"Callback received | status={status} | token={req_token[:8]}...")
+
+    if status != "success" or not req_token:
+        error_msg = request.args.get("message", "Login failed ya cancel kiya")
+        return render_template("login.html",
+            login_url=_get_login_url(),
+            api_key=KITE_API_KEY,
+            error=f"Zerodha login failed: {error_msg}",
+        )
+
+    # Token se session generate karo
+    try:
+        from kiteconnect import KiteConnect
+        kite = KiteConnect(api_key=KITE_API_KEY)
+
+        logger.info(f"Generating session for token: {req_token[:8]}...")
+        sess = kite.generate_session(
+            request_token=req_token,
+            api_secret=KITE_API_SECRET,
+        )
+
+        access_token = sess["access_token"]
+        user_name    = sess.get("user_name", "")
+        user_id      = sess.get("user_id", KITE_USER_ID)
+
+        kite.set_access_token(access_token)
+        _save_token(access_token, user_id, user_name)
+        _init_modules(kite, user_name, user_id)
+
+        logger.info(f"✅ Auto-login via callback: {user_name} ({user_id})")
+
+        # Seedha dashboard pe bhejo!
+        return render_template("index.html",
+            trading_mode=TRADING_MODE,
+            capital=TOTAL_CAPITAL,
+            is_paper=IS_PAPER_TRADING,
+            user_name=user_name,
+        )
+
+    except Exception as e:
+        logger.error(f"Callback login error: {e}")
+        return render_template("login.html",
+            login_url=_get_login_url(),
+            api_key=KITE_API_KEY,
+            error=f"Login error: {str(e)}",
+        )
+
+
+def _get_login_url() -> str:
+    """Fresh login URL generate karo"""
+    try:
+        from kiteconnect import KiteConnect
+        kite = KiteConnect(api_key=KITE_API_KEY)
+        return kite.login_url()
+    except Exception as e:
+        logger.error(f"Login URL error: {e}")
+        return ""
+    _state["logged_in"]   = False
+    _state["kite"]        = None
+    _state["user_name"]   = ""
+    _state["user_id"]     = ""
+    _state["bot_running"] = False
+    try:
+        TOKEN_FILE.unlink(missing_ok=True)
+    except Exception:
+        pass
+    return redirect(url_for("login_page"))
+
+
+# ─────────────────────────────────────────────────────────────
+# ROUTES - API
+# ─────────────────────────────────────────────────────────────
+
+@app.route("/api/login", methods=["POST"])
+def api_login():
+    """
+    Request token se access token generate karo.
+    Frontend se POST JSON: {"request_token": "xxxx"}
+    """
+    body = request.get_json(silent=True) or {}
+    req_token = body.get("request_token", "").strip()
+
+    if not req_token:
+        return jsonify({"success": False, "error": "Request token empty hai"})
+
+    try:
+        from kiteconnect import KiteConnect
+        kite = KiteConnect(api_key=KITE_API_KEY)
+
+        logger.info(f"Generating session with request_token: {req_token[:8]}...")
+        sess = kite.generate_session(
+            request_token=req_token,
+            api_secret=KITE_API_SECRET,
+        )
+
+        access_token = sess["access_token"]
+        user_name    = sess.get("user_name", "")
+        user_id      = sess.get("user_id", KITE_USER_ID)
+
+        kite.set_access_token(access_token)
+
+        # Save karo
+        _save_token(access_token, user_id, user_name)
+
+        # Modules initialize karo
+        _init_modules(kite, user_name, user_id)
+
+        logger.info(f"✅ Login successful: {user_name} ({user_id})")
+        return jsonify({
+            "success":   True,
+            "user_name": user_name,
+            "user_id":   user_id,
+            "redirect":  "/"
+        })
+
+    except Exception as e:
+        err = str(e)
+        logger.error(f"API login error: {err}")
+
+        # User-friendly messages
+        if "Invalid" in err or "token" in err.lower():
+            msg = "Token galat hai ya expire ho gaya. Zerodha se naya token lo."
+        elif "SSL" in err or "certificate" in err.lower():
+            msg = f"SSL Error. certifi install karo: pip install certifi\n{err}"
+        elif "Forbidden" in err or "403" in err:
+            msg = "API Key ya Secret galat hai. .env file check karo."
+        else:
+            msg = err
+
+        return jsonify({"success": False, "error": msg})
+
+
+@app.route("/api/status")
+def api_status():
+    # Get current system time - assuming it's already in IST
+    # (User confirmed system shows 1:33 PM when market is open)
+    ist_now = datetime.now()
+    
+    current_time = ist_now.time()
+    current_day  = ist_now.weekday()  # 0=Monday, 6=Sunday
+
+    # Market hours: Mon-Fri, 9:15 AM - 3:30 PM IST
+    market_open_time  = datetime.strptime("09:15", "%H:%M").time()
+    market_close_time = datetime.strptime("15:30", "%H:%M").time()
+
+    # Weekend check
+    if current_day >= 5:  # Saturday=5, Sunday=6
+        mkt = "CLOSED"
+    # Pre-market: before 9:15 AM
+    elif current_time < market_open_time:
+        mkt = "PRE_MARKET"
+    # Market hours: 9:15 AM - 3:30 PM
+    elif current_time <= market_close_time:
+        mkt = "OPEN"
+    # After market close
+    else:
+        mkt = "CLOSED"
+
+    return jsonify({
+        "logged_in":        _state["logged_in"],
+        "bot_running":      _state["bot_running"],
+        "trading_mode":     TRADING_MODE,
+        "is_paper":         IS_PAPER_TRADING,
+        "capital":          TOTAL_CAPITAL,
+        "market_status":    mkt,
+        "time":             ist_now.strftime("%I:%M:%S %p"),  # 12-hour format with AM/PM
+        "date":             ist_now.strftime("%d %b %Y"),
+        "day":              ist_now.strftime("%A"),
+        "user_name":        _state["user_name"],
+        "user_id":          _state["user_id"],
+        "ticker_connected": (
+            _state["ticker"].is_connected if _state["ticker"] else False
+        ),
+    })
+
+
+@app.route("/api/pnl")
+def api_pnl():
+    risk = _state["risk_mgr"]
+    if not risk:
+        return jsonify({
+            "daily_pnl": 0, "daily_pnl_pct": 0,
+            "total_trades": 0, "winners": 0, "losers": 0,
+            "win_rate": 0, "current_capital": TOTAL_CAPITAL,
+            "loss_used_pct": 0, "loss_remaining": MAX_DAILY_LOSS_AMOUNT,
+            "trading_halted": False, "halt_reason": "",
+            "active_positions": 0, "max_daily_loss": MAX_DAILY_LOSS_AMOUNT,
+        })
+    s = risk.get_daily_stats()
+    s["max_daily_loss"] = MAX_DAILY_LOSS_AMOUNT
+    return jsonify(s)
+
+
+@app.route("/api/positions")
+def api_positions():
+    positions = []
+    ltp_map   = {}
+
+    if _state["ticker"]:
+        ltp_map = _state["ticker"].get_ltp_map()
+    elif _state["data"]:
+        try:
+            syms = INTRADAY_CONFIG["watchlist"][:10]
+            ltp_map = _state["data"].get_ltp(syms)
+        except Exception:
+            pass
+
+    for name, strat in [("INTRADAY", _state["intraday_strat"]),
+                        ("SWING",    _state["swing_strat"])]:
+        if not strat:
+            continue
+        for sym, pos in strat.get_active_positions().items():
+            ltp = ltp_map.get(sym, pos["entry_price"])
+            pnl = (ltp - pos["entry_price"]) * pos.get("quantity", 1)
+            if pos["direction"] == "SHORT":
+                pnl = -pnl
+            positions.append({
+                "symbol":    sym,
+                "strategy":  name,
+                "direction": pos["direction"],
+                "qty":       pos.get("quantity", 1),
+                "entry":     round(pos["entry_price"], 2),
+                "ltp":       round(ltp, 2),
+                "sl":        round(pos["stop_loss"], 2),
+                "target":    round(pos["target"], 2),
+                "pnl":       round(pnl, 2),
+                "pnl_pct":   round(pnl / max(pos["entry_price"] * pos.get("quantity", 1), 1) * 100, 2),
+            })
+    return jsonify(positions)
+
+
+@app.route("/api/trades")
+def api_trades():
+    risk = _state["risk_mgr"]
+    return jsonify(risk.get_trade_history() if risk else [])
+
+
+@app.route("/api/watchlist")
+def api_watchlist():
+    result  = []
+    ltp_map = {}
+
+    if _state["ticker"]:
+        for sym, tick in _state["ticker"].get_all_ticks().items():
+            ltp_map[sym] = {
+                "ltp": tick.get("ltp", 0),
+                "change_pct": tick.get("change_pct", 0),
+                "volume": tick.get("volume", 0),
+            }
+    elif _state["data"]:
+        try:
+            syms = INTRADAY_CONFIG["watchlist"][:15]
+            for sym, ltp in _state["data"].get_ltp(syms).items():
+                ltp_map[sym] = {"ltp": ltp, "change_pct": 0, "volume": 0}
+        except Exception:
+            pass
+
+    in_pos = set()
+    if _state["intraday_strat"]:
+        in_pos = set(_state["intraday_strat"].get_active_positions().keys())
+
+    for sym in INTRADAY_CONFIG["watchlist"][:15]:
+        d = ltp_map.get(sym, {})
+        result.append({
+            "symbol":      sym,
+            "ltp":         d.get("ltp", 0),
+            "change_pct":  round(d.get("change_pct", 0), 2),
+            "volume":      d.get("volume", 0),
+            "in_position": sym in in_pos,
+        })
+    return jsonify(result)
+
+
+@app.route("/api/orders")
+def api_orders():
+    mgr = _state["order_mgr"]
+    if not mgr:
+        return jsonify([])
+    try:
+        return jsonify([{
+            "order_id":    o.order_id[:12],
+            "symbol":      o.symbol,
+            "transaction": o.transaction,
+            "qty":         o.quantity,
+            "price":       o.price,
+            "status":      o.status.value,
+            "type":        o.order_type,
+            "product":     o.product,
+            "tag":         o.tag,
+        } for o in mgr.get_orders()])
+    except Exception:
+        return jsonify([])
+
+
+@app.route("/api/bot/start", methods=["POST"])
+def api_bot_start():
+    if not _state["logged_in"]:
+        return jsonify({"success": False, "error": "Pehle login karo"})
+    if _state["bot_running"]:
+        return jsonify({"success": False, "error": "Bot already running hai"})
+
+    _state["bot_running"] = True
+
+    def _loop():
+        import time
+        logger.info("🤖 Bot loop started")
+        while _state["bot_running"]:
+            time.sleep(5)
+        logger.info("🛑 Bot loop stopped")
+
+    threading.Thread(target=_loop, daemon=True).start()
+    return jsonify({"success": True, "message": "Bot started!"})
+
+
+@app.route("/api/bot/stop", methods=["POST"])
+def api_bot_stop():
+    _state["bot_running"] = False
+    return jsonify({"success": True, "message": "Bot stopped"})
+
+
+# ─────────────────────────────────────────────────────────────
+# MARKET DATA APIs
+# ─────────────────────────────────────────────────────────────
+
+@app.route("/api/market/gainers-losers")
+def api_gainers_losers():
+    """
+    NSE se Top Gainers aur Losers fetch karo.
+    Price filter: ₹50 - ₹20,000
+    Agar live quotes nahi milti (Personal plan) toh instruments se basic data show karo.
+    """
+    if not _state["kite"]:
+        return jsonify({"error": "Not logged in", "gainers": [], "losers": []})
+
+    try:
+        kite = _state["kite"]
+        instruments = kite.instruments("NSE")
+
+        eq_stocks = [
+            inst for inst in instruments
+            if inst.get("instrument_type") == "EQ"
+            and inst.get("segment") == "NSE"
+        ]
+
+        if not eq_stocks:
+            return jsonify({"gainers": [], "losers": [], "total": 0})
+
+        # Live quotes try karo
+        symbols = [f"NSE:{s['tradingsymbol']}" for s in eq_stocks[:500]]
+        result = []
+
+        try:
+            ohlc_data = kite.ohlc(symbols)
+
+            name_map = {s["tradingsymbol"]: s.get("name", "") for s in eq_stocks}
+
+            for key, data in ohlc_data.items():
+                symbol     = key.replace("NSE:", "")
+                ltp        = data.get("last_price", 0)
+                prev_close = data.get("ohlc", {}).get("close", 0)
+
+                if ltp < 50 or ltp > 20000:
+                    continue
+                if prev_close <= 0:
+                    continue
+
+                change     = ltp - prev_close
+                change_pct = (change / prev_close) * 100
+
+                result.append({
+                    "symbol":     symbol,
+                    "name":       name_map.get(symbol, ""),
+                    "ltp":        round(ltp, 2),
+                    "prev_close": round(prev_close, 2),
+                    "open":       round(data.get("ohlc", {}).get("open", 0), 2),
+                    "high":       round(data.get("ohlc", {}).get("high", 0), 2),
+                    "low":        round(data.get("ohlc", {}).get("low",  0), 2),
+                    "change":     round(change, 2),
+                    "change_pct": round(change_pct, 2),
+                    "volume":     data.get("volume", 0),
+                })
+
+        except Exception as quote_err:
+            logger.warning(f"Live quotes failed ({quote_err}) - returning instruments only")
+            return jsonify({
+                "gainers": [],
+                "losers":  [],
+                "total":   0,
+                "error":   "Live market data ke liye Kite Connect plan 'Personal' se 'Connect' pe upgrade karo. developers.kite.trade pe jaao.",
+                "plan_issue": True,
+            })
+
+        gainers = sorted([s for s in result if s["change_pct"] > 0],
+                         key=lambda x: x["change_pct"], reverse=True)[:20]
+        losers  = sorted([s for s in result if s["change_pct"] < 0],
+                         key=lambda x: x["change_pct"])[:20]
+
+        return jsonify({
+            "gainers": gainers,
+            "losers":  losers,
+            "total":   len(result),
+            "scanned": len(symbols),
+        })
+
+    except Exception as e:
+        logger.error(f"Gainers/Losers error: {e}")
+        return jsonify({"error": str(e), "gainers": [], "losers": []})
+
+
+@app.route("/api/market/stocks")
+def api_market_stocks():
+    """
+    NSE stocks screener.
+    Agar live quotes nahi milti toh sirf instruments list show karo (no prices).
+    Search: symbol ya company name se dhundho.
+    """
+    if not _state["kite"]:
+        return jsonify({"error": "Not logged in", "stocks": [], "total": 0})
+
+    min_price  = float(request.args.get("min",    50))
+    max_price  = float(request.args.get("max", 20000))
+    sort_by    = request.args.get("sort", "chg_desc")
+    search_q   = request.args.get("q", "").upper().strip()
+
+    try:
+        kite        = _state["kite"]
+        instruments = kite.instruments("NSE")
+
+        eq_stocks = [
+            inst for inst in instruments
+            if inst.get("instrument_type") == "EQ"
+            and inst.get("segment") == "NSE"
+        ]
+
+        # Search filter pehle lagao (instruments pe, price se pehle)
+        if search_q:
+            eq_stocks = [
+                s for s in eq_stocks
+                if search_q in s.get("tradingsymbol", "").upper()
+                or search_q in s.get("name", "").upper()
+            ]
+
+        # Live quotes try karo
+        all_results = []
+        has_live_data = True
+
+        try:
+            # Batch mein fetch karo (max 500 per request)
+            batch_size = 500
+            stocks_to_fetch = eq_stocks[:3000]  # Max 3000 stocks
+
+            for i in range(0, len(stocks_to_fetch), batch_size):
+                batch   = stocks_to_fetch[i : i + batch_size]
+                symbols = [f"NSE:{s['tradingsymbol']}" for s in batch]
+                name_map = {s["tradingsymbol"]: s.get("name", "") for s in batch}
+
+                try:
+                    ohlc_data = kite.ohlc(symbols)
+                    
+                    # Try to fetch volume separately for first few stocks (quota limit)
+                    # Note: quote() API has strict rate limits, so only fetch for visible stocks
+                    volume_data = {}
+                    if i == 0:  # Only first batch
+                        try:
+                            # Fetch volume for first 100 stocks only (API limit)
+                            sample_symbols = symbols[:100]
+                            quotes = kite.quote(sample_symbols)
+                            for sym, quote_info in quotes.items():
+                                clean_sym = sym.replace("NSE:", "")
+                                volume_data[clean_sym] = (
+                                    quote_info.get("volume", 0) or
+                                    quote_info.get("volume_traded", 0) or
+                                    quote_info.get("day_volume", 0) or
+                                    0
+                                )
+                        except Exception as vol_err:
+                            logger.debug(f"Volume fetch skipped: {vol_err}")
+                            
+                except Exception as batch_err:
+                    logger.warning(f"Batch {i} OHLC failed: {batch_err}")
+                    has_live_data = False
+                    break
+
+                for key, data in ohlc_data.items():
+                    symbol     = key.replace("NSE:", "")
+                    ltp        = data.get("last_price", 0)
+                    prev_close = data.get("ohlc", {}).get("close", 0)
+                    
+                    # Get volume from separate fetch if available
+                    volume = volume_data.get(symbol, 0)
+
+                    # Price filter (search mode mein relax karo)
+                    if not search_q:
+                        if ltp < min_price or ltp > max_price:
+                            continue
+
+                    if prev_close > 0 and ltp > 0:
+                        change     = ltp - prev_close
+                        change_pct = (change / prev_close) * 100
+                    else:
+                        change = change_pct = 0
+
+                    all_results.append({
+                        "symbol":     symbol,
+                        "name":       name_map.get(symbol, ""),
+                        "ltp":        round(ltp, 2),
+                        "prev_close": round(prev_close, 2),
+                        "open":       round(data.get("ohlc", {}).get("open", 0), 2),
+                        "high":       round(data.get("ohlc", {}).get("high", 0), 2),
+                        "low":        round(data.get("ohlc", {}).get("low",  0), 2),
+                        "change":     round(change, 2),
+                        "change_pct": round(change_pct, 2),
+                        "volume":     volume,
+                        "has_price":  ltp > 0,
+                    })
+
+        except Exception as e:
+            has_live_data = False
+            logger.warning(f"Live quotes unavailable: {e}")
+
+        # Agar live data nahi mila - instruments se basic list banao
+        if not has_live_data or not all_results:
+            logger.info("Falling back to instruments list (no live prices)")
+            for s in eq_stocks[:1000]:
+                all_results.append({
+                    "symbol":     s.get("tradingsymbol", ""),
+                    "name":       s.get("name", ""),
+                    "ltp":        0,
+                    "prev_close": 0,
+                    "open":       0,
+                    "high":       0,
+                    "low":        0,
+                    "change":     0,
+                    "change_pct": 0,
+                    "volume":     0,
+                    "has_price":  False,
+                })
+
+        # Sort
+        sort_map = {
+            "chg_desc":    lambda x: -x["change_pct"],
+            "chg_asc":     lambda x:  x["change_pct"],
+            "price_asc":   lambda x:  x["ltp"],
+            "price_desc":  lambda x: -x["ltp"],
+            "volume_desc": lambda x: -x["volume"],
+            "name_asc":    lambda x:  x["symbol"],
+        }
+        all_results.sort(key=sort_map.get(sort_by, sort_map["chg_desc"]))
+
+        logger.info(f"Stocks: {len(all_results)} | search='{search_q}' | live={has_live_data}")
+        return jsonify({
+            "stocks":        all_results,
+            "total":         len(all_results),
+            "has_live_data": has_live_data,
+        })
+
+    except Exception as e:
+        logger.error(f"Stocks error: {e}")
+        return jsonify({"error": str(e), "stocks": [], "total": 0})
+
+
+@app.route("/api/watchlist/add", methods=["POST"])
+def api_watchlist_add():
+    """Symbol ko intraday watchlist mein add karo"""
+    body   = request.get_json(silent=True) or {}
+    symbol = body.get("symbol", "").upper().strip()
+
+    if not symbol:
+        return jsonify({"success": False, "error": "Symbol required"})
+
+    watchlist = INTRADAY_CONFIG["watchlist"]
+    if symbol in watchlist:
+        return jsonify({"success": False, "error": f"{symbol} already in watchlist"})
+
+    INTRADAY_CONFIG["watchlist"].append(symbol)
+    logger.info(f"Added to watchlist: {symbol}")
+    return jsonify({"success": True, "symbol": symbol})
+
+
+# ─────────────────────────────────────────────────────────────
+# SCANNER APIs
+# ─────────────────────────────────────────────────────────────
+
+# Scanner state - background scan track karne ke liye
+_scan_state = {
+    "running":    False,
+    "progress":   0,
+    "total":      0,
+    "current":    "",
+    "results":    [],
+    "last_scan":  None,
+    "error":      "",
+    "scan_type":  "",
+}
+
+
+@app.route("/api/scanner/run", methods=["POST"])
+def api_scanner_run():
+    """
+    Scanner background mein start karo.
+    POST body: {
+        "symbols":   ["RELIANCE","TCS",...] or "nifty50" / "nifty200" / "custom",
+        "timeframe": "day" / "60minute" / "15minute" / "5minute",
+        "min_score": 6,
+        "direction": "both" / "long" / "short"
+    }
+    """
+    if not _state["kite"]:
+        return jsonify({"success": False, "error": "Pehle login karo"})
+
+    if _scan_state["running"]:
+        return jsonify({"success": False, "error": "Scan already chal raha hai. Wait karo."})
+
+    body      = request.get_json(silent=True) or {}
+    timeframe = body.get("timeframe", "day")
+    min_score = int(body.get("min_score", 6))
+    direction = body.get("direction", "both")
+    symbols_q = body.get("symbols", "nifty50")
+
+    # Symbol list resolve karo
+    symbols = _resolve_symbols(symbols_q)
+    if not symbols:
+        return jsonify({"success": False, "error": "Koi symbol nahi mila"})
+
+    # Background thread mein start karo
+    def _run():
+        try:
+            from scanner import BulkScanner
+            _scan_state["running"]   = True
+            _scan_state["progress"]  = 0
+            _scan_state["total"]     = len(symbols)
+            _scan_state["results"]   = []
+            _scan_state["error"]     = ""
+            _scan_state["scan_type"] = f"{len(symbols)} stocks | {timeframe}"
+            _scan_state["current"]   = "Starting..."
+
+            def progress_cb(done, total, sym, current_results=None):
+                _scan_state["progress"] = done
+                _scan_state["current"]  = sym
+                if current_results is not None:
+                    filtered = current_results
+                    if direction == "long":
+                        filtered = [r for r in filtered if r.direction == "LONG"]
+                    elif direction == "short":
+                        filtered = [r for r in filtered if r.direction == "SHORT"]
+                    _scan_state["results"] = [r.to_dict() for r in filtered]
+
+            def stop_check():
+                return not _scan_state["running"]
+
+            bulk    = BulkScanner(_state["kite"])
+            results = bulk.scan_symbols(
+                symbols     = symbols,
+                timeframe   = timeframe,
+                days        = 200 if timeframe == "day" else 30,
+                min_score   = min_score,
+                progress_cb = progress_cb,
+                stop_check  = stop_check,
+            )
+
+            # Direction filter
+            if direction == "long":
+                results = [r for r in results if r.direction == "LONG"]
+            elif direction == "short":
+                results = [r for r in results if r.direction == "SHORT"]
+
+            _scan_state["results"]  = [r.to_dict() for r in results]
+            _scan_state["last_scan"] = datetime.now(IST_tz).strftime("%H:%M:%S %d-%b")
+            logger.info(f"Scan complete: {len(results)} signals found")
+
+        except Exception as e:
+            _scan_state["error"] = str(e)
+            logger.error(f"Scanner error: {e}")
+        finally:
+            _scan_state["running"] = False
+            if _scan_state["current"] != "Cancelled by user":
+                _scan_state["current"] = "Done"
+
+    threading.Thread(target=_run, daemon=True).start()
+
+    return jsonify({
+        "success":  True,
+        "total":    len(symbols),
+        "message":  f"Scanning {len(symbols)} stocks...",
+    })
+
+
+@app.route("/api/scanner/status")
+def api_scanner_status():
+    """Scanner ka current progress"""
+    pct = 0
+    if _scan_state["total"] > 0:
+        pct = round(_scan_state["progress"] / _scan_state["total"] * 100)
+
+    return jsonify({
+        "running":   _scan_state["running"],
+        "progress":  _scan_state["progress"],
+        "total":     _scan_state["total"],
+        "pct":       pct,
+        "current":   _scan_state["current"],
+        "results":   _scan_state["results"],
+        "count":     len(_scan_state["results"]),
+        "last_scan": _scan_state["last_scan"],
+        "error":     _scan_state["error"],
+        "scan_type": _scan_state["scan_type"],
+    })
+
+
+@app.route("/api/scanner/cancel", methods=["POST"])
+def api_scanner_cancel():
+    """Cancel running scan"""
+    _scan_state["running"] = False
+    _scan_state["current"] = "Cancelled by user"
+    logger.info("Scanner cancelled")
+    return jsonify({"success": True, "message": "Scan cancelled"})
+
+
+@app.route("/api/scanner/analyse", methods=["POST"])
+def api_scanner_analyse():
+    """
+    Single stock ka quick analysis karo.
+    POST: {"symbol": "RELIANCE", "timeframe": "day"}
+    """
+    if not _state["kite"]:
+        return jsonify({"success": False, "error": "Not logged in"})
+
+    body      = request.get_json(silent=True) or {}
+    symbol    = body.get("symbol", "").upper().strip()
+    timeframe = body.get("timeframe", "day")
+
+    if not symbol:
+        return jsonify({"success": False, "error": "Symbol required"})
+
+    try:
+        from scanner import BulkScanner
+        bulk = BulkScanner(_state["kite"])
+        df   = bulk._fetch_data(symbol, timeframe, days=200)
+
+        if df is None or df.empty:
+            return jsonify({
+                "success": False,
+                "error": f"{symbol} ka data nahi mila. "
+                         "Historical data ke liye Connect plan chahiye."
+            })
+
+        from scanner import StockScanner
+        sc     = StockScanner()
+        result = sc.analyse(symbol, "", df, timeframe)
+
+        if result:
+            return jsonify({"success": True, "signal": result.to_dict()})
+        else:
+            return jsonify({
+                "success":  False,
+                "no_signal": True,
+                "error":    f"{symbol} mein abhi koi strong signal nahi hai. "
+                            f"Score threshold meet nahi hua."
+            })
+
+    except Exception as e:
+        logger.error(f"Single analyse error {symbol}: {e}")
+        return jsonify({"success": False, "error": str(e)})
+
+
+_cached_all_nse_symbols: list = []
+
+def _resolve_symbols(query) -> list:
+    """
+    Symbol query ko actual symbols list mein convert karo.
+    Supports: "all_stocks", "all_nse", "nifty500", "all_sectors", index names, sector names, custom list
+    """
+    global _cached_all_nse_symbols
+
+    if isinstance(query, list):
+        return [s.upper().strip() for s in query if s.strip()]
+
+    # ── All Index Symbol Lists ────────────────────────────────
+    NIFTY_50 = [
+        "RELIANCE","TCS","HDFCBANK","ICICIBANK","INFY","HINDUNILVR",
+        "ITC","SBIN","BHARTIARTL","KOTAKBANK","LT","BAJFINANCE",
+        "HCLTECH","MARUTI","SUNPHARMA","TITAN","ADANIPORTS","ULTRACEMCO",
+        "AXISBANK","WIPRO","NESTLEIND","DMART","ASIANPAINT","BAJAJFINSV",
+        "POWERGRID","NTPC","TECHM","ONGC","COALINDIA","JSWSTEEL",
+        "TATAMOTORS","HINDALCO","TATASTEEL","DIVISLAB","CIPLA",
+        "DRREDDY","APOLLOHOSP","BPCL","EICHERMOT","GRASIM",
+        "HEROMOTOCO","INDUSINDBK","M&M","SBILIFE","HDFCLIFE",
+        "BAJAJ-AUTO","BRITANNIA","UPL","VEDL","ADANIENT"
+    ]
+    NIFTY_NEXT_50 = [
+        "ABB","ADANIGREEN","AMBUJACEM","AUROPHARMA","BANKBARODA",
+        "BERGEPAINT","BOSCHLTD","CANBK","CHOLAFIN","COLPAL",
+        "DABUR","DLF","GAIL","GODREJCP","HAVELLS","ICICIPRULI",
+        "INDIGO","IOC","IRCTC","JUBLFOOD","LUPIN","MARICO",
+        "MCDOWELL-N","MUTHOOTFIN","NAUKRI","NMDC","PAGEIND",
+        "PETRONET","PIDILITIND","RECLTD","SAIL","SIEMENS","SRF",
+        "TATACONSUM","TATAPOWER","TORNTPHARM","TRENT","TVSMOTORS",
+        "UBL","UNIONBANK","VBL","VOLTAS","ZYDUSLIFE",
+        "IDFCFIRSTB","GODREJPROP","TRIDENT","WHIRLPOOL"
+    ]
+    NIFTY_MIDCAP50 = [
+        "ABCAPITAL","ALKEM","APLLTD","ASTRAL","BALKRISIND",
+        "BATAINDIA","BSOFT","CANFINHOME","CDSL","COFORGE",
+        "CROMPTON","CUMMINSIND","DEEPAKNTR","DIXON","EMAMILTD",
+        "ESCORTS","EXIDEIND","FEDERALBNK","GLENMARK","HAL",
+        "IBULHSGFIN","IGL","INDHOTEL","IPCA","JKCEMENT",
+        "JUBILANT","KAJARIACER","KPITTECH","LAURUSLABS","LICHSGFIN",
+        "MANAPPURAM","MRF","NBCC","PERSISTENT","PHOENIXLTD",
+        "POLYCAB","RAMCOCEM","ROUTE","SBICARD","SUPREMEIND",
+        "TATAELXSI","THERMAX","TORNTPOWER","TVSMOTORS","UJJIVANSFB",
+        "VARROC","VGUARD","ZOMATO","NAUKRI","AAVAS"
+    ]
+    NIFTY_MIDCAP150 = [
+        "AAVAS","ABCAPITAL","ABFRL","ACC","ALKEM","APLLTD",
+        "ASTRAL","BALKRISIND","BANDHANBNK","BATAINDIA","BEL",
+        "BHARATFORG","BIOCON","BSOFT","CANFINHOME","CDSL",
+        "CESC","COFORGE","CONCOR","CROMPTON","CUMMINSIND",
+        "DEEPAKNTR","DIXON","EMAMILTD","ESCORTS","EXIDEIND",
+        "FEDERALBNK","GLENMARK","GNFC","GRANULES","GUJGASLTD",
+        "HAL","HONAUT","IBULHSGFIN","IGL","INDHOTEL","IPCA",
+        "JKCEMENT","JSWENERGY","JUBILANT","KAJARIACER","KPITTECH",
+        "LALPATHLAB","LAURUSLABS","LICHSGFIN","MANAPPURAM",
+        "NBCC","PERSISTENT","PHOENIXLTD","POLYCAB","RAMCOCEM",
+        "ROUTE","SBICARD","SUPREMEIND","SYNGENE","TATAELXSI",
+        "THERMAX","TORNTPOWER","TVSMOTORS","UJJIVANSFB",
+        "ZOMATO","NAUKRI","RITES","STAR","SUNDARMFIN","TATACHEM"
+    ]
+    NIFTY_SMALLCAP100 = [
+        "AARTIDRUGS","AARTIIND","AEGISLOG","AJANTPHARM","ALKYLAMINE",
+        "APTUS","ATUL","BALAMINES","BEML","BIKAJI","BLUESTARCO",
+        "BRIGADE","BSE","CAMPUS","CARYSIL","CASTROLIND","CEATLTD",
+        "CENTURYPLY","CLEAN","CMSINFO","DATAMATICS","DELTACORP",
+        "ELGIEQUIP","EQUITASBNK","ERIS","ESABINDIA","FINEORG",
+        "FLUOROCHEM","GALAXYSURF","GARFIBRES","GPIL","GRINDWELL",
+        "HAPPSTMNDS","HOMEFIRST","IDFC","IIFL","INDIAMART",
+        "INDIGOPNTS","INTELLECT","JBCHEPHARM","JINDALSAW","JKLAKSHMI",
+        "JMFINANCIL","KFINTECH","KNRCON","KRBL","LATENTVIEW",
+        "LXCHEM","MASTEK","MATRIMONY","MAZDOCK","METROPOLIS",
+        "NATCOPHARM","NAVINFLUOR","NAZARA","NIACL","OFSS","PCBL",
+        "PERSISTENT","PHOENIXLTD","POLYCAB","POWERINDIA","RAMCOCEM",
+        "RITES","ROUTE","SCHAEFFLER","SOLARINDS","STAR","SUNDARMFIN",
+        "SUPREMEIND","SYNGENE","TATACHEM","TATAELXSI","THERMAX",
+        "TIMKEN","TITAGARH","TORNTPOWER","TVSMOTOR","UJJIVANSFB",
+        "VAIBHAVGBL","VGUARD","VINATIORGA","ZOMATO","NAZARA"
+    ]
+    BANKNIFTY = [
+        "HDFCBANK","ICICIBANK","KOTAKBANK","AXISBANK","SBIN",
+        "INDUSINDBK","BANDHANBNK","FEDERALBNK","IDFCFIRSTB",
+        "AUBANK","PNB","BANKBARODA","CANBK","UNIONBANK","INDIANB"
+    ]
+    FINNIFTY = [
+        "HDFCBANK","ICICIBANK","KOTAKBANK","AXISBANK","SBIN",
+        "BAJFINANCE","BAJAJFINSV","HDFCLIFE","SBILIFE","ICICIPRULI",
+        "INDUSINDBK","MUTHOOTFIN","CHOLAFIN","RECLTD","PFC",
+        "IDFCFIRSTB","MANAPPURAM","LICHSGFIN","SBICARD","M&MFIN"
+    ]
+    SENSEX30 = [
+        "RELIANCE","TCS","HDFCBANK","ICICIBANK","INFY","HINDUNILVR",
+        "ITC","SBIN","BHARTIARTL","KOTAKBANK","LT","BAJFINANCE",
+        "HCLTECH","MARUTI","SUNPHARMA","TITAN","ULTRACEMCO","AXISBANK",
+        "WIPRO","NESTLEIND","ASIANPAINT","BAJAJFINSV","POWERGRID",
+        "NTPC","TECHM","ONGC","TATAMOTORS","TATASTEEL","INDUSINDBK","M&M"
+    ]
+    BSE100 = NIFTY_50 + NIFTY_NEXT_50
+
+    # ── Sector Stocks ─────────────────────────────────────────
+    SECTORS = {
+        "it_technology":         ["TCS","INFY","HCLTECH","WIPRO","TECHM","LTIM","MPHASIS","COFORGE","PERSISTENT","OFSS","KPITTECH","TATAELXSI","BSOFT","MASTEK","HAPPSTMNDS","LATENTVIEW"],
+        "banking":               ["HDFCBANK","ICICIBANK","KOTAKBANK","AXISBANK","SBIN","INDUSINDBK","BANDHANBNK","FEDERALBNK","IDFCFIRSTB","AUBANK","PNB","BANKBARODA","CANBK","UNIONBANK","INDIANB"],
+        "financial_services":    ["BAJFINANCE","BAJAJFINSV","HDFCLIFE","SBILIFE","ICICIPRULI","MUTHOOTFIN","CHOLAFIN","RECLTD","PFC","LICHSGFIN","SBICARD","MANAPPURAM","CANFINHOME","ABCAPITAL"],
+        "auto_ev":               ["MARUTI","TATAMOTORS","M&M","BAJAJ-AUTO","HEROMOTOCO","EICHERMOT","TVSMOTORS","ASHOKLEY","BOSCHLTD","MOTHERSON","EXIDEIND","BALKRISIND","ESCORTS","OLECTRA","ATHER"],
+        "pharma_healthcare":     ["SUNPHARMA","DIVISLAB","CIPLA","DRREDDY","APOLLOHOSP","ALKEM","TORNTPHARM","LUPIN","AUROPHARMA","IPCA","BIOCON","LALPATHLAB","METROPOLIS","SYNGENE","LAURUSLABS","ZYDUSLIFE"],
+        "fmcg_consumer":         ["HINDUNILVR","ITC","NESTLEIND","BRITANNIA","DABUR","MARICO","GODREJCP","COLPAL","EMAMILTD","TATACONSUM","VBL","UBL","MCDOWELL-N","BIKAJI"],
+        "oil_gas_energy":        ["RELIANCE","ONGC","BPCL","IOC","GAIL","PETRONET","HINDPETRO","NTPC","POWERGRID","TATAPOWER","ADANIPOWER","ADANIGREEN","JSWENERGY","CESC","TORNTPOWER","IGL","GUJGASLTD"],
+        "metals_mining":         ["TATASTEEL","HINDALCO","JSWSTEEL","VEDL","COALINDIA","NMDC","SAIL","HINDZINC","NATIONALUM","APLAPOLLO","GPIL","JINDALSTEL"],
+        "real_estate":           ["DLF","GODREJPROP","PHOENIXLTD","BRIGADE","PRESTIGE","SOBHA","IBREALEST","MAHLIFE","OBEROIRLTY","SUNTECK","KOLTEPATIL"],
+        "infrastructure_capgoods":["LT","ABB","SIEMENS","BEL","HAL","BHEL","THERMAX","CUMMINSIND","SCHAEFFLER","KEC","KALPATPOWR","NBCC","RITES","GRINDWELL"],
+        "cement":                ["ULTRACEMCO","GRASIM","AMBUJACEM","ACC","SHREECEM","RAMCOCEM","JKCEMENT","JKLAKSHMI","STAR","KAJARIACER"],
+        "telecom_media":         ["BHARTIARTL","IDEA","INDUSTOWER","TATACOMM","ROUTE","NETWORK18","ZEEL","HATHWAY"],
+        "chemicals_specialty":   ["PIDILITIND","SRF","DEEPAKNTR","AARTIIND","NAVINFLUOR","CLEAN","FINEORG","ATUL","LXCHEM","ALKYLAMINE","GNFC","FLUOROCHEM","BALAMINES","SOLARINDS","PCBL"],
+        "retail_ecommerce":      ["DMART","TRENT","NYKAA","TITAN","BATAINDIA","ABFRL","CAMPUS","VMART"],
+        "defence":               ["HAL","BEL","BHEL","BEML","MIDHANI","GRSE","COCHINSHIP"],
+        "new_age_tech":          ["ZOMATO","PAYTM","NYKAA","POLICYBZR","DELHIVERY","NAZARA","EASEMYTRIP","MAMAEARTH"],
+    }
+
+    INDEX_MAP = {
+        "nifty50":           NIFTY_50,
+        "nifty_next50":      NIFTY_NEXT_50,
+        "nifty100":          NIFTY_50 + NIFTY_NEXT_50,
+        "nifty_midcap50":    NIFTY_MIDCAP50,
+        "nifty_midcap150":   NIFTY_MIDCAP150,
+        "nifty_smallcap100": NIFTY_SMALLCAP100,
+        "nifty200":          NIFTY_50 + NIFTY_NEXT_50 + NIFTY_MIDCAP150,
+        "banknifty":         BANKNIFTY,
+        "finnifty":          FINNIFTY,
+        "sensex30":          SENSEX30,
+        "bse100":            BSE100,
+        "watchlist":         INTRADAY_CONFIG["watchlist"],
+    }
+
+    if isinstance(query, list):
+        return [s.upper().strip() for s in query if s.strip()]
+
+    q = query.lower().strip() if isinstance(query, str) else ""
+
+    # All combined predefined fallback
+    all_predefined = list(dict.fromkeys(
+        NIFTY_50 + NIFTY_NEXT_50 + NIFTY_MIDCAP150 + NIFTY_SMALLCAP100 +
+        [s for sec in SECTORS.values() for s in sec]
+    ))
+
+    # All NSE / All Stocks
+    if q in ("all_stocks", "all_nse", "all"):
+        if _cached_all_nse_symbols:
+            return _cached_all_nse_symbols
+        try:
+            kite = _state.get("kite")
+            if kite:
+                instruments = kite.instruments("NSE")
+                eq_stocks = [
+                    inst["tradingsymbol"]
+                    for inst in instruments
+                    if inst.get("instrument_type") == "EQ"
+                    and inst.get("segment") == "NSE"
+                    and inst.get("tradingsymbol")
+                ]
+                if eq_stocks:
+                    _cached_all_nse_symbols = sorted(list(dict.fromkeys(eq_stocks)))
+                    logger.info(f"Loaded {len(_cached_all_nse_symbols)} NSE EQ stocks for All Stocks scan")
+                    return _cached_all_nse_symbols
+        except Exception as e:
+            logger.warning(f"Failed to fetch all NSE instruments: {e}")
+        return all_predefined
+
+    # Nifty 500
+    if q == "nifty500":
+        if _cached_all_nse_symbols:
+            return _cached_all_nse_symbols[:500]
+        try:
+            kite = _state.get("kite")
+            if kite:
+                instruments = kite.instruments("NSE")
+                eq_stocks = [
+                    inst["tradingsymbol"]
+                    for inst in instruments
+                    if inst.get("instrument_type") == "EQ"
+                    and inst.get("segment") == "NSE"
+                    and inst.get("tradingsymbol")
+                ]
+                if eq_stocks:
+                    _cached_all_nse_symbols = sorted(list(dict.fromkeys(eq_stocks)))
+                    return _cached_all_nse_symbols[:500]
+        except Exception:
+            pass
+        return all_predefined[:500] if len(all_predefined) >= 500 else all_predefined
+
+    if q in INDEX_MAP:
+        return INDEX_MAP[q]
+    if q in SECTORS:
+        return SECTORS[q]
+    if q == "all_sectors":
+        seen, result = set(), []
+        for stocks in SECTORS.values():
+            for s in stocks:
+                if s not in seen:
+                    seen.add(s); result.append(s)
+        return result
+    if "," in query:
+        return [s.upper().strip() for s in query.split(",") if s.strip()]
+    if q:
+        return [q.upper()]
+
+    return NIFTY_50
+
+
+
+
+# ─────────────────────────────────────────────────────────────
+# TRADING APIs - BUY / SELL / EXIT
+# ─────────────────────────────────────────────────────────────
+
+@app.route("/api/trade/place", methods=["POST"])
+def api_trade_place():
+    """
+    Order place karo.
+    POST body:
+    {
+        "symbol":        "RELIANCE",
+        "exchange":      "NSE",
+        "transaction":   "BUY" | "SELL",
+        "quantity":      10,
+        "order_type":    "MARKET" | "LIMIT" | "SL" | "SL-M",
+        "product":       "MIS" | "CNC" | "NRML",
+        "price":         0,          # 0 for MARKET
+        "trigger_price": 0,          # for SL / SL-M
+        "stop_loss":     0,          # optional SL order
+        "target":        0,          # optional target order
+        "tag":           "MANUAL"
+    }
+    """
+    if not _state["kite"]:
+        return jsonify({"success": False, "error": "Pehle login karo"})
+
+    body = request.get_json(silent=True) or {}
+
+    # Required fields
+    symbol      = body.get("symbol",      "").upper().strip()
+    exchange    = body.get("exchange",    "NSE").upper()
+    transaction = body.get("transaction", "BUY").upper()
+    quantity    = int(body.get("quantity", 0))
+    order_type  = body.get("order_type",  "MARKET").upper()
+    product     = body.get("product",     "MIS").upper()
+    price       = float(body.get("price",         0))
+    trig_price  = float(body.get("trigger_price", 0))
+    tag         = body.get("tag", "MANUAL")[:20]
+
+    # Validation
+    if not symbol:
+        return jsonify({"success": False, "error": "Symbol required hai"})
+    if quantity <= 0:
+        return jsonify({"success": False, "error": "Quantity 0 se zyada honi chahiye"})
+    if transaction not in ("BUY", "SELL"):
+        return jsonify({"success": False, "error": "Transaction BUY ya SELL hona chahiye"})
+    if order_type in ("LIMIT", "SL") and price <= 0:
+        return jsonify({"success": False, "error": f"{order_type} order mein price required hai"})
+    if order_type in ("SL", "SL-M") and trig_price <= 0:
+        return jsonify({"success": False, "error": "SL order mein trigger price required hai"})
+
+    # Paper trading check
+    if IS_PAPER_TRADING:
+        logger.info(f"📄 PAPER order: {transaction} {quantity} {symbol} @ {order_type}")
+        
+        # Get SL and Target from request
+        stop_loss = float(body.get("stop_loss", 0))
+        target    = float(body.get("target",    0))
+        
+        # Fetch current market price for MARKET orders
+        exec_price = price
+        if order_type == "MARKET" or exec_price == 0:
+            try:
+                kite = _state["kite"]
+                if kite:
+                    ohlc_data = kite.ohlc([f"{exchange}:{symbol}"])
+                    exec_price = ohlc_data.get(f"{exchange}:{symbol}", {}).get("last_price", 0)
+                    if exec_price == 0:
+                        exec_price = 100  # Fallback dummy price
+            except Exception as e:
+                logger.warning(f"LTP fetch failed for paper order: {e}")
+                exec_price = 100  # Fallback
+        
+        # Save to paper portfolio
+        portfolio = _state.get("paper_portfolio")
+        if portfolio:
+            order_id = portfolio.place_order(
+                symbol=symbol,
+                exchange=exchange,
+                transaction=transaction,
+                quantity=quantity,
+                order_type=order_type,
+                product=product,
+                price=exec_price,
+                trigger_price=trig_price,
+                stop_loss=stop_loss,
+                target=target,
+                tag=tag,
+            )
+        else:
+            order_id = f"PAPER_{symbol}_{transaction}_{quantity}"
+        
+        return jsonify({
+            "success":    True,
+            "order_id":   order_id,
+            "paper_mode": True,
+            "message":    f"📄 PAPER: {transaction} {quantity} {symbol} @ ₹{exec_price:.2f}",
+            "symbol":     symbol,
+            "transaction": transaction,
+            "quantity":   quantity,
+            "order_type": order_type,
+            "product":    product,
+            "price":      exec_price,
+        })
+
+    # Live order
+    try:
+        kite = _state["kite"]
+
+        # Map to kite constants
+        kite_txn = kite.TRANSACTION_TYPE_BUY if transaction == "BUY" else kite.TRANSACTION_TYPE_SELL
+        kite_ot  = {
+            "MARKET": kite.ORDER_TYPE_MARKET,
+            "LIMIT":  kite.ORDER_TYPE_LIMIT,
+            "SL":     kite.ORDER_TYPE_SL,
+            "SL-M":   kite.ORDER_TYPE_SLM,
+        }.get(order_type, kite.ORDER_TYPE_MARKET)
+        kite_prod = {
+            "MIS":  kite.PRODUCT_MIS,
+            "CNC":  kite.PRODUCT_CNC,
+            "NRML": kite.PRODUCT_NRML,
+        }.get(product, kite.PRODUCT_MIS)
+
+        params = {
+            "variety":          kite.VARIETY_REGULAR,
+            "exchange":         exchange,
+            "tradingsymbol":    symbol,
+            "transaction_type": kite_txn,
+            "quantity":         quantity,
+            "product":          kite_prod,
+            "order_type":       kite_ot,
+            "tag":              tag,
+        }
+        if order_type in ("LIMIT", "SL") and price > 0:
+            params["price"] = price
+        if order_type in ("SL", "SL-M") and trig_price > 0:
+            params["trigger_price"] = trig_price
+
+        order_id = kite.place_order(**params)
+        logger.info(f"✅ Order placed: {transaction} {quantity} {symbol} | ID: {order_id}")
+
+        # Agar stop_loss bhi diya hai toh SL order bhi lagao
+        sl_order_id = None
+        sl_val = float(body.get("stop_loss", 0))
+        if sl_val > 0 and order_type == "MARKET":
+            sl_txn  = kite.TRANSACTION_TYPE_SELL if transaction == "BUY" else kite.TRANSACTION_TYPE_BUY
+            try:
+                sl_order_id = kite.place_order(
+                    variety=kite.VARIETY_REGULAR,
+                    exchange=exchange,
+                    tradingsymbol=symbol,
+                    transaction_type=sl_txn,
+                    quantity=quantity,
+                    product=kite_prod,
+                    order_type=kite.ORDER_TYPE_SLM,
+                    trigger_price=sl_val,
+                    tag="SL_" + tag,
+                )
+                logger.info(f"✅ SL order placed: {sl_val} | ID: {sl_order_id}")
+            except Exception as e:
+                logger.warning(f"SL order failed: {e}")
+
+        return jsonify({
+            "success":     True,
+            "order_id":    str(order_id),
+            "sl_order_id": str(sl_order_id) if sl_order_id else None,
+            "paper_mode":  False,
+            "message":     f"✅ {transaction} {quantity} {symbol} order placed!",
+            "symbol":      symbol,
+            "transaction": transaction,
+            "quantity":    quantity,
+            "order_type":  order_type,
+            "product":     product,
+            "price":       price,
+        })
+
+    except Exception as e:
+        err = str(e)
+        logger.error(f"Order placement error: {err}")
+        if "Insufficient" in err or "margin" in err.lower():
+            msg = "Insufficient margin! Funds check karo."
+        elif "Invalid" in err:
+            msg = f"Invalid order: {err}"
+        else:
+            msg = err
+        return jsonify({"success": False, "error": msg})
+
+
+@app.route("/api/trade/exit", methods=["POST"])
+def api_trade_exit():
+    """
+    Kisi specific position se exit karo (square off).
+    POST: {"symbol": "RELIANCE", "exchange": "NSE", "product": "MIS", "quantity": 10}
+    """
+    if not _state["kite"]:
+        return jsonify({"success": False, "error": "Not logged in"})
+
+    body     = request.get_json(silent=True) or {}
+    symbol   = body.get("symbol",   "").upper()
+    exchange = body.get("exchange", "NSE").upper()
+    product  = body.get("product",  "MIS").upper()
+    quantity = int(body.get("quantity", 0))
+    txn      = body.get("transaction", "SELL").upper()   # SELL to exit long, BUY to exit short
+
+    if not symbol or quantity <= 0:
+        return jsonify({"success": False, "error": "Symbol aur quantity required"})
+
+    if IS_PAPER_TRADING:
+        return jsonify({
+            "success":  True,
+            "message":  f"📄 PAPER: Exit {quantity} {symbol} ({product})",
+            "paper_mode": True,
+        })
+
+    try:
+        kite = _state["kite"]
+        kite_txn  = kite.TRANSACTION_TYPE_SELL if txn == "SELL" else kite.TRANSACTION_TYPE_BUY
+        kite_prod = {
+            "MIS":  kite.PRODUCT_MIS,
+            "CNC":  kite.PRODUCT_CNC,
+            "NRML": kite.PRODUCT_NRML,
+        }.get(product, kite.PRODUCT_MIS)
+
+        order_id = kite.place_order(
+            variety=kite.VARIETY_REGULAR,
+            exchange=exchange,
+            tradingsymbol=symbol,
+            transaction_type=kite_txn,
+            quantity=quantity,
+            product=kite_prod,
+            order_type=kite.ORDER_TYPE_MARKET,
+            tag="EXIT",
+        )
+        logger.info(f"✅ Exit order: {symbol} {quantity} | ID: {order_id}")
+        return jsonify({
+            "success":  True,
+            "order_id": str(order_id),
+            "message":  f"✅ Exit order placed for {quantity} {symbol}",
+        })
+
+    except Exception as e:
+        logger.error(f"Exit order error: {e}")
+        return jsonify({"success": False, "error": str(e)})
+
+
+@app.route("/api/trade/squareoff_all", methods=["POST"])
+def api_squareoff_all():
+    """Saari intraday (MIS) positions ek saath band karo"""
+    if not _state["kite"]:
+        return jsonify({"success": False, "error": "Not logged in"})
+
+    if IS_PAPER_TRADING:
+        return jsonify({"success": True, "message": "📄 PAPER: All positions squared off", "count": 0})
+
+    try:
+        kite      = _state["kite"]
+        positions = kite.positions().get("net", [])
+        count     = 0
+        errors    = []
+
+        for pos in positions:
+            qty = pos.get("quantity", 0)
+            if qty == 0:
+                continue
+            symbol   = pos.get("tradingsymbol", "")
+            exchange = pos.get("exchange", "NSE")
+            product  = pos.get("product", "MIS")
+            txn = kite.TRANSACTION_TYPE_SELL if qty > 0 else kite.TRANSACTION_TYPE_BUY
+            abs_qty  = abs(qty)
+
+            try:
+                kite.place_order(
+                    variety=kite.VARIETY_REGULAR,
+                    exchange=exchange,
+                    tradingsymbol=symbol,
+                    transaction_type=txn,
+                    quantity=abs_qty,
+                    product=kite.PRODUCT_MIS,
+                    order_type=kite.ORDER_TYPE_MARKET,
+                    tag="SQUAREOFF",
+                )
+                count += 1
+            except Exception as e:
+                errors.append(f"{symbol}: {e}")
+
+        msg = f"✅ {count} positions squared off"
+        if errors:
+            msg += f" | Errors: {', '.join(errors[:3])}"
+
+        logger.info(msg)
+        return jsonify({"success": True, "message": msg, "count": count, "errors": errors})
+
+    except Exception as e:
+        logger.error(f"Square off all error: {e}")
+        return jsonify({"success": False, "error": str(e)})
+
+
+@app.route("/api/trade/positions")
+def api_trade_positions():
+    """Live positions from Kite (net + day)"""
+    if not _state["kite"]:
+        return jsonify({"net": [], "day": []})
+
+    if IS_PAPER_TRADING:
+        return jsonify({"net": [], "day": [], "paper_mode": True})
+
+    try:
+        pos = _state["kite"].positions()
+        return jsonify({
+            "net": pos.get("net", []),
+            "day": pos.get("day", []),
+        })
+    except Exception as e:
+        logger.error(f"Positions error: {e}")
+        return jsonify({"net": [], "day": [], "error": str(e)})
+
+
+@app.route("/api/trade/holdings")
+def api_trade_holdings():
+    """CNC holdings (long-term portfolio)"""
+    if not _state["kite"]:
+        return jsonify({"holdings": []})
+
+    if IS_PAPER_TRADING:
+        return jsonify({"holdings": [], "paper_mode": True})
+
+    try:
+        holdings = _state["kite"].holdings()
+        return jsonify({"holdings": holdings})
+    except Exception as e:
+        logger.error(f"Holdings error: {e}")
+        return jsonify({"holdings": [], "error": str(e)})
+
+
+@app.route("/api/trade/funds")
+def api_trade_funds():
+    """Available funds/margin"""
+    if not _state["kite"]:
+        return jsonify({"available": 0, "used": 0, "net": 0})
+
+    if IS_PAPER_TRADING:
+        return jsonify({
+            "available": TOTAL_CAPITAL,
+            "used":      0,
+            "net":       TOTAL_CAPITAL,
+            "paper_mode": True,
+        })
+
+    try:
+        margins = _state["kite"].margins()
+        equity  = margins.get("equity", {})
+        return jsonify({
+            "available": equity.get("available", {}).get("cash", 0),
+            "used":      equity.get("utilised",  {}).get("debits", 0),
+            "net":       equity.get("net", 0),
+        })
+    except Exception as e:
+        logger.error(f"Funds error: {e}")
+        return jsonify({"available": 0, "used": 0, "net": 0, "error": str(e)})
+
+
+# ─────────────────────────────────────────────────────────────
+# PAPER TRADING - Portfolio Tracking
+# ─────────────────────────────────────────────────────────────
+
+@app.route("/api/trade/paper_positions")
+def api_paper_positions():
+    """
+    Paper trading positions with live P&L.
+    Returns: [{"symbol", "quantity", "avg_price", "ltp", "pnl", "pnl_pct", ...}]
+    """
+    if not IS_PAPER_TRADING:
+        return jsonify({"positions": [], "error": "Not in paper mode"})
+
+    portfolio = _state.get("paper_portfolio")
+    if not portfolio:
+        return jsonify({"positions": [], "error": "Portfolio not initialized"})
+
+    try:
+        kite = _state.get("kite")
+        positions = portfolio.get_positions(kite=kite)
+        
+        # Calculate totals
+        total_pnl     = sum(p["pnl"] for p in positions)
+        total_invested = sum(p["avg_price"] * abs(p["quantity"]) for p in positions)
+        overall_pct   = (total_pnl / total_invested * 100) if total_invested > 0 else 0
+        
+        return jsonify({
+            "positions":    positions,
+            "total_pnl":    round(total_pnl, 2),
+            "total_invested": round(total_invested, 2),
+            "overall_pct":  round(overall_pct, 2),
+            "closed_pnl":   round(portfolio.closed_pnl, 2),
+            "count":        len(positions),
+        })
+    except Exception as e:
+        logger.error(f"Paper positions error: {e}")
+        return jsonify({"positions": [], "error": str(e)})
+
+
+@app.route("/api/trade/paper_orders")
+def api_paper_orders():
+    """
+    Paper trading order history.
+    Returns: [{"order_id", "symbol", "transaction", "quantity", "price", "timestamp", ...}]
+    """
+    if not IS_PAPER_TRADING:
+        return jsonify({"orders": [], "error": "Not in paper mode"})
+
+    portfolio = _state.get("paper_portfolio")
+    if not portfolio:
+        return jsonify({"orders": [], "error": "Portfolio not initialized"})
+
+    try:
+        limit  = int(request.args.get("limit", 50))
+        orders = portfolio.get_orders(limit=limit)
+        
+        return jsonify({
+            "orders": orders,
+            "count":  len(orders),
+        })
+    except Exception as e:
+        logger.error(f"Paper orders error: {e}")
+        return jsonify({"orders": [], "error": str(e)})
+
+
+@app.route("/api/trade/paper_exit", methods=["POST"])
+def api_paper_exit():
+    """
+    Close a paper trading position.
+    POST body: {"symbol": "RELIANCE", "price": 2500}  # price optional
+    """
+    if not IS_PAPER_TRADING:
+        return jsonify({"success": False, "error": "Not in paper mode"})
+
+    portfolio = _state.get("paper_portfolio")
+    if not portfolio:
+        return jsonify({"success": False, "error": "Portfolio not initialized"})
+
+    body   = request.get_json(silent=True) or {}
+    symbol = body.get("symbol", "").upper().strip()
+    price  = float(body.get("price", 0))
+
+    if not symbol:
+        return jsonify({"success": False, "error": "Symbol required"})
+
+    try:
+        kite    = _state.get("kite")
+        success = portfolio.exit_position(symbol=symbol, price=price, kite=kite)
+        
+        if success:
+            return jsonify({
+                "success": True,
+                "message": f"Position closed: {symbol}",
+                "symbol":  symbol,
+            })
+        else:
+            return jsonify({
+                "success": False,
+                "error":   f"Position not found: {symbol}",
+            })
+    except Exception as e:
+        logger.error(f"Paper exit error: {e}")
+        return jsonify({"success": False, "error": str(e)})
+
+
+@app.route("/api/trade/paper_reset", methods=["POST"])
+def api_paper_reset():
+    """Reset paper portfolio - clear all positions and orders"""
+    if not IS_PAPER_TRADING:
+        return jsonify({"success": False, "error": "Not in paper mode"})
+
+    portfolio = _state.get("paper_portfolio")
+    if not portfolio:
+        return jsonify({"success": False, "error": "Portfolio not initialized"})
+
+    try:
+        portfolio.reset()
+        return jsonify({
+            "success": True,
+            "message": "Paper portfolio reset complete",
+        })
+    except Exception as e:
+        logger.error(f"Paper reset error: {e}")
+        return jsonify({"success": False, "error": str(e)})
+
+
+@app.route("/api/trade/quote")
+def api_trade_quote():
+    """Symbol ka live quote (LTP + OHLC)"""
+    symbol   = request.args.get("symbol",   "").upper()
+    exchange = request.args.get("exchange", "NSE").upper()
+    if not symbol:
+        return jsonify({"error": "Symbol required"})
+
+    if not _state["kite"]:
+        return jsonify({"error": "Not logged in"})
+
+    try:
+        key   = f"{exchange}:{symbol}"
+        quote = _state["kite"].quote([key]).get(key, {})
+        ohlc  = quote.get("ohlc", {})
+        return jsonify({
+            "symbol":     symbol,
+            "ltp":        quote.get("last_price", 0),
+            "open":       ohlc.get("open",  0),
+            "high":       ohlc.get("high",  0),
+            "low":        ohlc.get("low",   0),
+            "close":      ohlc.get("close", 0),
+            "volume":     quote.get("volume_traded", 0),
+            "buy_qty":    quote.get("total_buy_quantity",  0),
+            "sell_qty":   quote.get("total_sell_quantity", 0),
+            "change":     quote.get("net_change", 0),
+            "change_pct": round(
+                (quote.get("last_price", 0) - ohlc.get("close", 1)) /
+                max(ohlc.get("close", 1), 1) * 100, 2
+            ),
+        })
+    except Exception as e:
+        logger.error(f"Quote error {symbol}: {e}")
+        return jsonify({"error": str(e), "ltp": 0})
+
+
+# ─────────────────────────────────────────────────────────────
+# SECTOR HEATMAP & INDEX APIs
+# ─────────────────────────────────────────────────────────────
+
+# Sector data - heatmap ke liye (web_app level pe define)
+_SECTOR_MAP = {
+    "IT & Technology":          ["TCS","INFY","HCLTECH","WIPRO","TECHM","MPHASIS","COFORGE","PERSISTENT","OFSS","KPITTECH","TATAELXSI","BSOFT","MASTEK","HAPPSTMNDS","LATENTVIEW"],
+    "Banking":                  ["HDFCBANK","ICICIBANK","KOTAKBANK","AXISBANK","SBIN","INDUSINDBK","BANDHANBNK","FEDERALBNK","IDFCFIRSTB","AUBANK","PNB","BANKBARODA","CANBK","UNIONBANK"],
+    "Financial Services":       ["BAJFINANCE","BAJAJFINSV","HDFCLIFE","SBILIFE","ICICIPRULI","MUTHOOTFIN","CHOLAFIN","RECLTD","PFC","LICHSGFIN","SBICARD","MANAPPURAM","CANFINHOME"],
+    "Auto & EV":                ["MARUTI","TATAMOTORS","M&M","BAJAJ-AUTO","HEROMOTOCO","EICHERMOT","TVSMOTORS","BOSCHLTD","MOTHERSON","EXIDEIND","BALKRISIND","ESCORTS"],
+    "Pharma & Healthcare":      ["SUNPHARMA","DIVISLAB","CIPLA","DRREDDY","APOLLOHOSP","ALKEM","TORNTPHARM","LUPIN","AUROPHARMA","IPCA","BIOCON","LALPATHLAB","SYNGENE","ZYDUSLIFE"],
+    "FMCG & Consumer":          ["HINDUNILVR","ITC","NESTLEIND","BRITANNIA","DABUR","MARICO","GODREJCP","COLPAL","EMAMILTD","TATACONSUM","VBL","UBL","MCDOWELL-N"],
+    "Oil, Gas & Energy":        ["RELIANCE","ONGC","BPCL","IOC","GAIL","PETRONET","NTPC","POWERGRID","TATAPOWER","ADANIPOWER","ADANIGREEN","JSWENERGY","CESC","IGL"],
+    "Metals & Mining":          ["TATASTEEL","HINDALCO","JSWSTEEL","VEDL","COALINDIA","NMDC","SAIL","HINDZINC","NATIONALUM","GPIL"],
+    "Real Estate":              ["DLF","GODREJPROP","PHOENIXLTD","BRIGADE","PRESTIGE","SOBHA","OBEROIRLTY","SUNTECK"],
+    "Infra & Capital Goods":    ["LT","ABB","SIEMENS","BEL","HAL","BHEL","THERMAX","CUMMINSIND","KEC","NBCC","RITES"],
+    "Cement":                   ["ULTRACEMCO","GRASIM","AMBUJACEM","ACC","SHREECEM","RAMCOCEM","JKCEMENT","STAR","KAJARIACER"],
+    "Telecom":                  ["BHARTIARTL","IDEA","INDUSTOWER","TATACOMM","ROUTE"],
+    "Chemicals":                ["PIDILITIND","SRF","DEEPAKNTR","AARTIIND","NAVINFLUOR","CLEAN","FINEORG","ATUL","LXCHEM","ALKYLAMINE","GNFC","SOLARINDS"],
+    "Defence":                  ["HAL","BEL","BHEL","BEML","MIDHANI","GRSE","COCHINSHIP"],
+    "New Age & Tech":           ["ZOMATO","PAYTM","NYKAA","POLICYBZR","DELHIVERY","NAZARA","EASEMYTRIP"],
+}
+
+
+@app.route("/api/indices/list")
+def api_indices_list():
+    """Available indices aur sectors ki list"""
+    indices = [
+        # All Market
+        {"key": "all_stocks",        "label": "🌐 All Stocks (All NSE EQ)", "count": 1800, "group": "All Market"},
+        {"key": "nifty500",          "label": "📊 Nifty 500",          "count": 500,  "group": "NSE Index"},
+        # NSE Indices
+        {"key": "nifty50",           "label": "🔵 Nifty 50",           "count": 50,  "group": "NSE Index"},
+        {"key": "nifty_next50",      "label": "🔵 Nifty Next 50",      "count": 47,  "group": "NSE Index"},
+        {"key": "nifty100",          "label": "🔵 Nifty 100",          "count": 97,  "group": "NSE Index"},
+        {"key": "banknifty",         "label": "🏦 Bank Nifty",         "count": 15,  "group": "NSE Index"},
+        {"key": "finnifty",          "label": "💰 Fin Nifty",          "count": 20,  "group": "NSE Index"},
+        {"key": "nifty_midcap50",    "label": "📊 Nifty Midcap 50",    "count": 50,  "group": "NSE Midcap"},
+        {"key": "nifty_midcap150",   "label": "📊 Nifty Midcap 150",   "count": 65,  "group": "NSE Midcap"},
+        {"key": "nifty_smallcap100", "label": "📉 Nifty Smallcap 100", "count": 80,  "group": "NSE Smallcap"},
+        {"key": "nifty200",          "label": "📈 Nifty 200",          "count": 162, "group": "NSE Index"},
+        # BSE Indices
+        {"key": "sensex30",          "label": "🟠 Sensex 30",          "count": 30,  "group": "BSE Index"},
+        {"key": "bse100",            "label": "🟠 BSE 100",            "count": 97,  "group": "BSE Index"},
+        # Special
+        {"key": "watchlist",         "label": "⭐ My Watchlist",       "count": len(INTRADAY_CONFIG["watchlist"]), "group": "Custom"},
+        {"key": "all_sectors",       "label": "🌐 All Sectors",        "count": 200, "group": "Custom"},
+    ]
+
+    sectors = [
+        {"key":   name.lower().replace(" ", "_").replace(",","").replace("&",""),
+         "label": name,
+         "count": len(stocks),
+         "group": "Sector"}
+        for name, stocks in _SECTOR_MAP.items()
+    ]
+
+    return jsonify({"indices": indices, "sectors": sectors})
+
+
+@app.route("/api/sector/heatmap")
+def api_sector_heatmap():
+    """
+    Har sector ka average % change fetch karo.
+    Aaj kaunsa sector teji mein hai kaunsa mandi mein.
+    """
+    if not _state["kite"]:
+        return jsonify({"error": "Not logged in", "sectors": []})
+
+    try:
+        kite    = _state["kite"]
+        results = []
+
+        for sector_name, symbols in _SECTOR_MAP.items():
+            clean = [s for s in symbols if s and s.replace("-","").replace("&","").replace("_","").isalnum() or "-" in s][:12]
+            if not clean:
+                continue
+
+            try:
+                ohlc = kite.ohlc([f"NSE:{s}" for s in clean])
+            except Exception:
+                continue
+
+            changes, up, dn = [], 0, 0
+            top_gainer = {"symbol": "", "chg": 0.0, "ltp": 0.0}
+            top_loser  = {"symbol": "", "chg": 0.0, "ltp": 0.0}
+
+            for key, data in ohlc.items():
+                sym  = key.replace("NSE:", "")
+                ltp  = data.get("last_price", 0)
+                prev = data.get("ohlc", {}).get("close", 0)
+                if ltp <= 0 or prev <= 0:
+                    continue
+                chg = (ltp - prev) / prev * 100
+                changes.append(chg)
+                if chg > 0:
+                    up += 1
+                    if chg > top_gainer["chg"]:
+                        top_gainer = {"symbol": sym, "chg": round(chg,2), "ltp": round(ltp,2)}
+                else:
+                    dn += 1
+                    if chg < top_loser["chg"]:
+                        top_loser = {"symbol": sym, "chg": round(chg,2), "ltp": round(ltp,2)}
+
+            if not changes:
+                continue
+
+            avg  = round(sum(changes) / len(changes), 2)
+            total = up + dn
+
+            results.append({
+                "sector":     sector_name,
+                "avg_change": avg,
+                "up_stocks":  up,
+                "dn_stocks":  dn,
+                "total":      total,
+                "up_pct":     round(up / max(total,1) * 100),
+                "top_gainer": top_gainer,
+                "top_loser":  top_loser,
+                "strength":   "BULLISH" if avg > 0.5 else "BEARISH" if avg < -0.5 else "NEUTRAL",
+            })
+
+        results.sort(key=lambda x: -x["avg_change"])
+        return jsonify({"sectors": results, "total": len(results),
+                        "timestamp": datetime.now(IST_tz).strftime("%H:%M:%S")})
+
+    except Exception as e:
+        logger.error(f"Sector heatmap error: {e}")
+        return jsonify({"error": str(e), "sectors": []})
+
+
+@app.route("/api/sector/stocks")
+def api_sector_stocks():
+    """Ek sector ke stocks detail"""
+    sector = request.args.get("name", "")
+    stocks = _SECTOR_MAP.get(sector, [])
+    if not stocks:
+        # Try key-based lookup
+        for name, syms in _SECTOR_MAP.items():
+            k = name.lower().replace(" ","_").replace(",","").replace("&","")
+            if k == sector.lower():
+                stocks = syms
+                sector = name
+                break
+
+    if not stocks:
+        return jsonify({"error": f"Sector not found: {sector}", "stocks": []})
+
+    if not _state["kite"]:
+        return jsonify({"sector": sector,
+                        "stocks": [{"symbol":s,"ltp":0,"change_pct":0} for s in stocks],
+                        "total": len(stocks)})
+    try:
+        ohlc   = _state["kite"].ohlc([f"NSE:{s}" for s in stocks[:20]])
+        result = []
+        for key, data in ohlc.items():
+            sym  = key.replace("NSE:","")
+            ltp  = data.get("last_price",0)
+            prev = data.get("ohlc",{}).get("close",0)
+            chg  = (ltp-prev)/prev*100 if prev>0 else 0
+            result.append({
+                "symbol": sym, "ltp": round(ltp,2),
+                "prev_close": round(prev,2),
+                "open": round(data.get("ohlc",{}).get("open",0),2),
+                "high": round(data.get("ohlc",{}).get("high",0),2),
+                "low":  round(data.get("ohlc",{}).get("low",0),2),
+                "change_pct": round(chg,2),
+                "volume": data.get("volume",0),
+            })
+        result.sort(key=lambda x: -x["change_pct"])
+        return jsonify({"sector": sector, "stocks": result, "total": len(result)})
+    except Exception as e:
+        return jsonify({"error": str(e), "stocks": []})
+
+
+# ─────────────────────────────────────────────────────────────
+# MAIN
+# ─────────────────────────────────────────────────────────────
+
+if __name__ == "__main__":
+    setup_logger("INFO", "logs/web_app.log")
+    errors, warnings = validate_config()
+    for w in warnings:
+        logger.warning(w)
+    for e in errors:
+        logger.error(e)
+
+    logger.info("🌐 Starting Web Server → http://localhost:5000")
+    app.run(
+        host="0.0.0.0",
+        port=5000,
+        debug=False,
+        use_reloader=False,
+        threaded=True,
+    )
