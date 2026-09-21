@@ -770,6 +770,51 @@ def api_market_stocks():
         return jsonify({"error": str(e), "stocks": [], "total": 0})
 
 
+_prev_day_cache: dict = {}
+_prev_day_cache_date: str = ""
+
+def _get_symbol_prev_day(symbol: str, kite, token_map: dict = None) -> dict:
+    """Ek symbol ke previous day high, low, close return karo."""
+    global _prev_day_cache, _prev_day_cache_date
+    today_str = str(date.today())
+    if _prev_day_cache_date != today_str:
+        _prev_day_cache.clear()
+        _prev_day_cache_date = today_str
+
+    if symbol in _prev_day_cache:
+        return _prev_day_cache[symbol]
+
+    if not kite:
+        return {}
+
+    try:
+        token = token_map.get(symbol) if token_map else None
+        if token:
+            to_d = datetime.now(IST_tz)
+            from_d = to_d - timedelta(days=5)
+            recs = kite.historical_data(token, from_d, to_d, "day")
+            if recs and len(recs) >= 1:
+                last_rec = recs[-1]
+                rec_date = last_rec["date"].date() if hasattr(last_rec["date"], "date") else str(last_rec["date"])[:10]
+                if str(rec_date) == today_str and len(recs) >= 2:
+                    prev_rec = recs[-2]
+                else:
+                    prev_rec = last_rec
+
+                res = {
+                    "high": float(prev_rec["high"]),
+                    "low": float(prev_rec["low"]),
+                    "close": float(prev_rec["close"]),
+                    "open": float(prev_rec["open"]),
+                }
+                _prev_day_cache[symbol] = res
+                return res
+    except Exception:
+        pass
+
+    return {}
+
+
 @app.route("/api/market/reversals")
 def api_market_reversals():
     """
@@ -800,15 +845,18 @@ def api_market_reversals():
         if not symbols:
             symbols = _resolve_symbols("nifty50")
 
-        # Name lookup map
+        # Name lookup map and token map
         name_map = {}
+        token_map = {}
         try:
             instruments = kite.instruments("NSE")
             for inst in instruments:
                 sym = inst.get("tradingsymbol")
                 nm = inst.get("name")
-                if sym and nm:
-                    name_map[sym] = nm
+                tok = inst.get("instrument_token")
+                if sym:
+                    if nm: name_map[sym] = nm
+                    if tok: token_map[sym] = tok
         except Exception:
             pass
 
@@ -861,7 +909,25 @@ def api_market_reversals():
                     recovery_from_low_pct = (recovery_from_low_amt / low_p) * 100
                     rev_strength = round((ltp - low_p) / rng * 100, 1) if rng > 0 else 50.0
 
-                    crossed_prev_day = bool(prev_close > 0 and low_p <= prev_close and ltp > prev_close)
+                    # Previous Day High / Low
+                    prev_data = _get_symbol_prev_day(sym, kite, token_map)
+                    prev_high = prev_data.get("high", 0.0)
+                    prev_low  = prev_data.get("low", 0.0)
+                    benchmark_p = prev_high if prev_high > 0 else prev_close
+
+                    crossed_break = bool(benchmark_p > 0 and ltp >= benchmark_p)
+                    near_break = False
+                    break_dist_pct = 0.0
+                    if benchmark_p > 0:
+                        if crossed_break:
+                            break_dist_pct = round((ltp - benchmark_p) / benchmark_p * 100, 2)
+                        else:
+                            dist = benchmark_p - ltp
+                            break_dist_pct = round((dist / benchmark_p) * 100, 2)
+                            if 0 < break_dist_pct <= 0.45:
+                                near_break = True
+
+                    crossed_prev_day = crossed_break or bool(prev_close > 0 and low_p <= prev_close and ltp > prev_close)
                     is_above_prev_day = bool(prev_close > 0 and ltp > prev_close)
                     prev_diff_pct = round((ltp - prev_close) / prev_close * 100, 2) if prev_close > 0 else 0.0
 
@@ -873,6 +939,8 @@ def api_market_reversals():
                         "high": round(high_p, 2),
                         "low": round(low_p, 2),
                         "prev_close": round(prev_close, 2),
+                        "prev_high": round(prev_high, 2) if prev_high > 0 else round(prev_close, 2),
+                        "prev_low": round(prev_low, 2) if prev_low > 0 else round(prev_close, 2),
                         "dip_amt": round(dip_amt, 2),
                         "dip_pct": round(dip_pct, 2),
                         "gain_vs_open_amt": round(gain_vs_open_amt, 2),
@@ -885,6 +953,10 @@ def api_market_reversals():
                         "crossed_prev_day": crossed_prev_day,
                         "is_above_prev_day": is_above_prev_day,
                         "prev_diff_pct": prev_diff_pct,
+                        "near_break": near_break,
+                        "crossed_break": crossed_break,
+                        "break_level": round(benchmark_p, 2),
+                        "break_dist_pct": break_dist_pct,
                         "volume": int(item.get("volume", 0) or 0),
                         "rev_strength": rev_strength,
                     })
@@ -901,7 +973,26 @@ def api_market_reversals():
                     fall_from_high_amt = high_p - ltp
                     fall_from_high_pct = (fall_from_high_amt / high_p) * 100
                     rev_strength = round((high_p - ltp) / rng * 100, 1) if rng > 0 else 50.0
-                    crossed_prev_day = bool(prev_close > 0 and high_p >= prev_close and ltp < prev_close)
+
+                    # Previous Day High / Low
+                    prev_data = _get_symbol_prev_day(sym, kite, token_map)
+                    prev_high = prev_data.get("high", 0.0)
+                    prev_low  = prev_data.get("low", 0.0)
+                    benchmark_p = prev_low if prev_low > 0 else prev_close
+
+                    crossed_break = bool(benchmark_p > 0 and ltp <= benchmark_p)
+                    near_break = False
+                    break_dist_pct = 0.0
+                    if benchmark_p > 0:
+                        if crossed_break:
+                            break_dist_pct = round((benchmark_p - ltp) / benchmark_p * 100, 2)
+                        else:
+                            dist = ltp - benchmark_p
+                            break_dist_pct = round((dist / benchmark_p) * 100, 2)
+                            if 0 < break_dist_pct <= 0.45:
+                                near_break = True
+
+                    crossed_prev_day = crossed_break or bool(prev_close > 0 and high_p >= prev_close and ltp < prev_close)
                     is_below_prev_day = bool(prev_close > 0 and ltp < prev_close)
                     prev_diff_pct = round((ltp - prev_close) / prev_close * 100, 2) if prev_close > 0 else 0.0
 
@@ -913,6 +1004,8 @@ def api_market_reversals():
                         "high": round(high_p, 2),
                         "low": round(low_p, 2),
                         "prev_close": round(prev_close, 2),
+                        "prev_high": round(prev_high, 2) if prev_high > 0 else round(prev_close, 2),
+                        "prev_low": round(prev_low, 2) if prev_low > 0 else round(prev_close, 2),
                         "rally_amt": round(rally_amt, 2),
                         "rally_pct": round(rally_pct, 2),
                         "drop_vs_open_amt": round(drop_vs_open_amt, 2),
@@ -925,6 +1018,10 @@ def api_market_reversals():
                         "crossed_prev_day": crossed_prev_day,
                         "is_below_prev_day": is_below_prev_day,
                         "prev_diff_pct": prev_diff_pct,
+                        "near_break": near_break,
+                        "crossed_break": crossed_break,
+                        "break_level": round(benchmark_p, 2),
+                        "break_dist_pct": break_dist_pct,
                         "volume": int(item.get("volume", 0) or 0),
                         "rev_strength": rev_strength,
                     })
@@ -932,8 +1029,10 @@ def api_market_reversals():
         up_side.sort(key=lambda x: -x["recovery_from_low_pct"])
         down_side.sort(key=lambda x: -x["fall_from_high_pct"])
 
-        up_crossed_count = sum(1 for x in up_side if x.get("crossed_prev_day"))
-        down_crossed_count = sum(1 for x in down_side if x.get("crossed_prev_day"))
+        up_crossed_count = sum(1 for x in up_side if x.get("crossed_break") or x.get("crossed_prev_day"))
+        down_crossed_count = sum(1 for x in down_side if x.get("crossed_break") or x.get("crossed_prev_day"))
+        up_near_count = sum(1 for x in up_side if x.get("near_break"))
+        down_near_count = sum(1 for x in down_side if x.get("near_break"))
 
         return jsonify({
             "success": True,
@@ -946,6 +1045,8 @@ def api_market_reversals():
             "down_count": len(down_side),
             "up_crossed_count": up_crossed_count,
             "down_crossed_count": down_crossed_count,
+            "up_near_count": up_near_count,
+            "down_near_count": down_near_count,
             "up_side": up_side,
             "down_side": down_side,
             "timestamp": datetime.now(IST_tz).strftime("%I:%M:%S %p"),

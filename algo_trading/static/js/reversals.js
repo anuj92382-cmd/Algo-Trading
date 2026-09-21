@@ -290,6 +290,14 @@ function renderReversalsTable(list) {
         const ltpPct = Math.min(100, Math.max(0, ((ltp - low) / totalSpan) * 100));
         const prevPct = (prev > 0) ? Math.min(100, Math.max(0, ((prev - low) / totalSpan) * 100)) : -10;
 
+        // Row highlighting: Light Yellow blink if near break, Light Green if crossed break
+        let rowClass = '';
+        if (item.near_break) {
+            rowClass = 'row-near-break';
+        } else if (item.crossed_break) {
+            rowClass = 'row-crossed-break';
+        }
+
         let meterHTML = '';
         if (_revTab === 'UP') {
             meterHTML = `
@@ -328,10 +336,14 @@ function renderReversalsTable(list) {
             const gainVsOpen = (item.gain_vs_open_pct || 0).toFixed(2);
             const recoveryPct = (item.recovery_from_low_pct || 0).toFixed(2);
 
-            // Previous Day crossover badge
+            // Previous Day crossover / near break badge
             let crossBadge = '';
-            if (item.crossed_prev_day) {
-                crossBadge = `<span class="badge-pill green" title="Crossed above Previous Day Close today!">⚡ Crossed Up</span>`;
+            if (item.crossed_break) {
+                crossBadge = `<span class="badge-pill green" title="Crossed above Previous Day High!">🔥 CROSSED PDH</span>`;
+            } else if (item.near_break) {
+                crossBadge = `<span class="badge-pill yellow blink" title="About to break Previous Day High! (${item.break_dist_pct}% away)">⚠️ NEAR BREAK (${item.break_dist_pct}%)</span>`;
+            } else if (item.crossed_prev_day) {
+                crossBadge = `<span class="badge-pill green" title="Crossed above Previous Day Close!">⚡ Crossed Up</span>`;
             } else if (item.is_above_prev_day) {
                 crossBadge = `<span class="badge-mini green" title="Trading above Previous Day">▲ Above</span>`;
             } else {
@@ -343,15 +355,21 @@ function renderReversalsTable(list) {
             const t1 = (ltp + risk * 1.5).toFixed(2);
             const t2 = (ltp + risk * 2.5).toFixed(2);
 
+            const displayPrev = (item.prev_high && item.prev_high > 0) ? item.prev_high : prev;
+            const prevLabel = (item.prev_high && item.prev_high > 0) ? 'PDH' : 'Close';
+
             return `
-                <tr>
+                <tr class="${rowClass}">
                     <td class="dim">${rank}</td>
                     <td>
                         <b>${sym}</b>
-                        ${item.crossed_prev_day ? '<span class="badge-mini green" style="margin-left:4px" title="Crossed Previous Day!">⚡</span>' : ''}
+                        ${item.crossed_break ? '<span class="badge-mini green" style="margin-left:4px" title="Crossed PDH!">🔥</span>' : (item.near_break ? '<span class="badge-mini yellow blink" style="margin-left:4px" title="Near Breakout!">⚡</span>' : '')}
                         <div class="dim" style="font-size:10px;max-width:120px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${item.name || ''}</div>
                     </td>
-                    <td class="dim">₹${prev > 0 ? prev.toFixed(2) : '--'}</td>
+                    <td class="dim" title="${prevLabel}: ₹${displayPrev.toFixed(2)}">
+                        <b>₹${displayPrev > 0 ? displayPrev.toFixed(2) : '--'}</b>
+                        <div style="font-size:9px;color:var(--text3)">${prevLabel}</div>
+                    </td>
                     <td>₹${open.toFixed(2)}</td>
                     <td>
                         ₹${low.toFixed(2)}
@@ -391,10 +409,14 @@ function renderReversalsTable(list) {
             const dropVsOpen = (item.drop_vs_open_pct || 0).toFixed(2);
             const fallPct = (item.fall_from_high_pct || 0).toFixed(2);
 
-            // Previous Day crossdown badge
+            // Previous Day crossdown / near break badge
             let crossBadge = '';
-            if (item.crossed_prev_day) {
-                crossBadge = `<span class="badge-pill red" title="Crossed below Previous Day Close today!">⚡ Crossed Down</span>`;
+            if (item.crossed_break) {
+                crossBadge = `<span class="badge-pill red" title="Crossed below Previous Day Low!">💥 CROSSED PDL</span>`;
+            } else if (item.near_break) {
+                crossBadge = `<span class="badge-pill yellow blink" title="About to break Previous Day Low! (${item.break_dist_pct}% away)">⚠️ NEAR BREAK (${item.break_dist_pct}%)</span>`;
+            } else if (item.crossed_prev_day) {
+                crossBadge = `<span class="badge-pill red" title="Crossed below Previous Day Close!">⚡ Crossed Down</span>`;
             } else if (item.is_below_prev_day) {
                 crossBadge = `<span class="badge-mini red" title="Trading below Previous Day">▼ Below</span>`;
             } else {
@@ -406,15 +428,21 @@ function renderReversalsTable(list) {
             const t1 = (ltp - risk * 1.5).toFixed(2);
             const t2 = (ltp - risk * 2.5).toFixed(2);
 
+            const displayPrev = (item.prev_low && item.prev_low > 0) ? item.prev_low : prev;
+            const prevLabel = (item.prev_low && item.prev_low > 0) ? 'PDL' : 'Close';
+
             return `
-                <tr>
+                <tr class="${rowClass}">
                     <td class="dim">${rank}</td>
                     <td>
                         <b>${sym}</b>
-                        ${item.crossed_prev_day ? '<span class="badge-mini red" style="margin-left:4px" title="Crossed Previous Day!">⚡</span>' : ''}
+                        ${item.crossed_break ? '<span class="badge-mini red" style="margin-left:4px" title="Crossed PDL!">💥</span>' : (item.near_break ? '<span class="badge-mini yellow blink" style="margin-left:4px" title="Near Breakdown!">⚡</span>' : '')}
                         <div class="dim" style="font-size:10px;max-width:120px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${item.name || ''}</div>
                     </td>
-                    <td class="dim">₹${prev > 0 ? prev.toFixed(2) : '--'}</td>
+                    <td class="dim" title="${prevLabel}: ₹${displayPrev.toFixed(2)}">
+                        <b>₹${displayPrev > 0 ? displayPrev.toFixed(2) : '--'}</b>
+                        <div style="font-size:9px;color:var(--text3)">${prevLabel}</div>
+                    </td>
                     <td>₹${open.toFixed(2)}</td>
                     <td>
                         ₹${high.toFixed(2)}
