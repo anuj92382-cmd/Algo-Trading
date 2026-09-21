@@ -427,7 +427,7 @@ function _setDisplay(id, val) {
 // ─────────────────────────────────────────────────────────────
 let _qoData = {};
 
-function quickOrder(symbol, direction, entry, sl, t1, t2, t3) {
+function quickOrder(symbol, direction, entry, sl, t1, t2, t3, tag) {
     const isLong   = direction === 'BUY';
     const dirCls   = isLong ? 'long' : 'short';
     const dirIcon  = isLong ? '📈' : '📉';
@@ -437,14 +437,29 @@ function quickOrder(symbol, direction, entry, sl, t1, t2, t3) {
     const fmt    = (v) => (v && !isNaN(v)) ? parseFloat(v).toFixed(2) : '0.00';
     const fmtPct = (a, b) => (a && b && b > 0) ? ((Math.abs(a - b) / b) * 100).toFixed(1) : '0.0';
 
-    const slDiff  = fmtPct(sl, entry);
-    const t1Diff  = fmtPct(t1, entry);
-    const t2Diff  = fmtPct(t2, entry);
-    const riskAmt = (entry && sl) ? Math.abs(entry - sl).toFixed(2) : '0.00';
+    const numEntry = parseFloat(entry) || 0;
+    const numSl    = parseFloat(sl) || 0;
+    const numT1    = parseFloat(t1) || 0;
+    const numT2    = parseFloat(t2) || 0;
+    const numT3    = parseFloat(t3) || 0;
+
+    const slDiff  = fmtPct(numSl, numEntry);
+    const t1Diff  = fmtPct(numT1, numEntry);
+    const t2Diff  = fmtPct(numT2, numEntry);
+    const riskAmt = (numEntry && numSl) ? Math.abs(numEntry - numSl).toFixed(2) : '0.00';
+    const initMargin = (numEntry / 5.0).toFixed(0);
 
     // Store for confirm step
-    _qoData = { symbol, direction, entry: parseFloat(entry)||0, sl: parseFloat(sl)||0,
-                t1: parseFloat(t1)||0, t2: parseFloat(t2)||0, t3: parseFloat(t3)||0 };
+    _qoData = {
+        symbol,
+        direction,
+        entry: numEntry,
+        sl: numSl,
+        t1: numT1,
+        t2: numT2,
+        t3: numT3,
+        tag: tag || 'QUICK_ORDER'
+    };
 
     const modalHTML = `
 <div class="qo-form">
@@ -456,21 +471,21 @@ function quickOrder(symbol, direction, entry, sl, t1, t2, t3) {
     <div class="qo-levels">
         <div class="qo-level-item">
             <div class="qo-level-lbl">⚡ Entry</div>
-            <div class="qo-level-val green">₹${fmt(entry)}</div>
+            <div class="qo-level-val green">₹${fmt(numEntry)}</div>
         </div>
         <div class="qo-level-item">
             <div class="qo-level-lbl">🛑 Stop Loss</div>
-            <div class="qo-level-val red">₹${fmt(sl)}</div>
+            <div class="qo-level-val red">₹${fmt(numSl)}</div>
             <div class="qo-level-sub red">-${slDiff}%</div>
         </div>
         <div class="qo-level-item">
             <div class="qo-level-lbl">🎯 Target 1</div>
-            <div class="qo-level-val" style="color:#fbbf24">₹${fmt(t1)}</div>
+            <div class="qo-level-val" style="color:#fbbf24">₹${fmt(numT1)}</div>
             <div class="qo-level-sub dim">+${t1Diff}%</div>
         </div>
         <div class="qo-level-item">
             <div class="qo-level-lbl">🎯 Target 2</div>
-            <div class="qo-level-val" style="color:#34d399">₹${fmt(t2)}</div>
+            <div class="qo-level-val" style="color:#34d399">₹${fmt(numT2)}</div>
             <div class="qo-level-sub dim">+${t2Diff}%</div>
         </div>
     </div>
@@ -487,16 +502,20 @@ function quickOrder(symbol, direction, entry, sl, t1, t2, t3) {
 
     <div class="qo-prod-section">
         <label class="qo-label">Product Type</label>
-        <select id="qo-product" class="qo-select">
-            <option value="MIS">MIS — Intraday</option>
-            <option value="CNC">CNC — Delivery</option>
+        <select id="qo-product" class="qo-select" onchange="calcQoValue()">
+            <option value="MIS" selected>MIS — Intraday (5X Margin)</option>
+            <option value="CNC">CNC — Delivery (1X Cash)</option>
         </select>
     </div>
 
     <div class="qo-calc-bar">
         <div class="qo-calc-item">
             <span class="dim">Est. Value</span>
-            <b id="qo-est-val">₹${fmt(entry)}</b>
+            <b id="qo-est-val">₹${fmt(numEntry)}</b>
+        </div>
+        <div class="qo-calc-item">
+            <span class="dim">Margin Req.</span>
+            <b id="qo-margin-val" style="color:var(--accent)">₹${initMargin} (5X)</b>
         </div>
         <div class="qo-calc-item">
             <span class="dim">Max Risk</span>
@@ -525,7 +544,7 @@ function quickOrder(symbol, direction, entry, sl, t1, t2, t3) {
         .then(st => {
             const noteEl = document.getElementById('qo-paper-note');
             if (noteEl && st.is_paper) {
-                noteEl.textContent = '📄 PAPER MODE — Koi real order nahi jayega';
+                noteEl.textContent = '📄 PAPER MODE — 5X Margin Enabled for Intraday (MIS)';
             }
         })
         .catch(() => {});
@@ -544,21 +563,29 @@ function adjustQty(delta) {
 }
 
 function calcQoValue() {
-    const qty      = parseInt(document.getElementById('qo-qty')?.value || 1);
+    const qtyInput = document.getElementById('qo-qty');
+    const qty      = Math.max(1, parseInt(qtyInput?.value || 1));
     const entry    = _qoData.entry || 0;
+    const product  = document.getElementById('qo-product')?.value || 'MIS';
     const riskPerShare = Math.abs((_qoData.entry || 0) - (_qoData.sl || 0));
 
-    const estEl  = document.getElementById('qo-est-val');
-    const riskEl = document.getElementById('qo-max-risk');
+    const estEl    = document.getElementById('qo-est-val');
+    const marginEl = document.getElementById('qo-margin-val');
+    const riskEl   = document.getElementById('qo-max-risk');
 
-    if (estEl)  estEl.textContent  = '₹' + (qty * entry).toLocaleString('en-IN', {maximumFractionDigits: 0});
-    if (riskEl) riskEl.textContent = '₹' + (qty * riskPerShare).toFixed(0);
+    const totalVal  = qty * entry;
+    const marginReq = (product === 'MIS') ? (totalVal / 5.0) : totalVal;
+
+    if (estEl)    estEl.textContent  = '₹' + Math.round(totalVal).toLocaleString('en-IN');
+    if (marginEl) marginEl.textContent = '₹' + Math.ceil(marginReq).toLocaleString('en-IN') + (product === 'MIS' ? ' (5X)' : ' (1X)');
+    if (riskEl)   riskEl.textContent = '₹' + (qty * riskPerShare).toFixed(0);
 }
 
 async function confirmQuickOrder() {
-    const qty     = parseInt(document.getElementById('qo-qty')?.value  || 0);
-    const product = document.getElementById('qo-product')?.value || 'MIS';
-    const btn     = document.getElementById('qo-submit-btn');
+    const qtyInput = document.getElementById('qo-qty');
+    const qty      = parseInt(qtyInput?.value  || 0);
+    const product  = document.getElementById('qo-product')?.value || 'MIS';
+    const btn      = document.getElementById('qo-submit-btn');
 
     if (qty <= 0) {
         showToast('Quantity 1 ya zyada honi chahiye!', 'toast-error');
@@ -586,7 +613,7 @@ async function confirmQuickOrder() {
                 price:       0,
                 stop_loss:   _qoData.sl || 0,
                 target:      _qoData.t1 || 0,
-                tag:         'SCANNER',
+                tag:         _qoData.tag || 'QUICK_ORDER',
             }),
         });
         const data = await res.json();
@@ -594,7 +621,7 @@ async function confirmQuickOrder() {
         if (data.success) {
             showToast(
                 data.paper_mode
-                    ? `📄 PAPER: ${_qoData.direction} ${qty} ${_qoData.symbol} order recorded`
+                    ? `📄 PAPER: ${_qoData.direction} ${qty} ${_qoData.symbol} order placed (MIS 5X Margin)`
                     : `✅ ${_qoData.direction} ${qty} ${_qoData.symbol} order placed! ID: ${(data.order_id||'').substring(0,12)}`,
                 'toast-success'
             );
@@ -603,14 +630,14 @@ async function confirmQuickOrder() {
             showToast(`❌ ${data.error || 'Order failed'}`, 'toast-error');
             if (btn) {
                 btn.disabled    = false;
-                btn.textContent = `Place ${_qoData.direction} Order`;
+                btn.textContent = `${_qoData.direction === 'BUY' ? '📈' : '📉'} Place ${_qoData.direction} Order — ${_qoData.symbol}`;
             }
         }
     } catch (err) {
         showToast('❌ Network error: ' + err.message, 'toast-error');
         if (btn) {
             btn.disabled    = false;
-            btn.textContent = `Place ${_qoData.direction} Order`;
+            btn.textContent = `${_qoData.direction === 'BUY' ? '📈' : '📉'} Place ${_qoData.direction} Order — ${_qoData.symbol}`;
         }
     }
 }
@@ -625,4 +652,12 @@ function closeQuickOrder() {
 document.addEventListener('click', e => {
     const m = document.getElementById('sc-qo-modal');
     if (m && e.target === m) closeQuickOrder();
+});
+
+// Escape key se band karo
+document.addEventListener('keydown', e => {
+    if (e.key === 'Escape') {
+        closeQuickOrder();
+        closeModal();
+    }
 });

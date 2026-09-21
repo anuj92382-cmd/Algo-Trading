@@ -2170,15 +2170,18 @@ td:first-child { color: var(--text3); font-size: 11px; }
 
 .qo-calc-item {
     flex: 1;
-    padding: 8px 12px;
+    padding: 8px 6px;
     display: flex;
     flex-direction: column;
+    align-items: center;
+    text-align: center;
     gap: 3px;
     border-right: 1px solid var(--border);
-    font-size: 11px;
+    font-size: 10px;
+    min-width: 0;
 }
 .qo-calc-item:last-child { border-right: none; }
-.qo-calc-item b { font-size: 13px; font-weight: 700; }
+.qo-calc-item b { font-size: 12px; font-weight: 700; white-space: nowrap; }
 
 /* Submit button */
 .qo-submit {

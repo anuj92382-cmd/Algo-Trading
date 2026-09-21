@@ -609,28 +609,6 @@
             <!-- Results Grid -->
             <div id="sc-results-grid" class="sc-results-grid"></div>
 
-            <!-- Quick Order Modal -->
-            <div id="sc-qo-modal" class="sc-qo-modal" style="display:none">
-                <div class="sc-qo-box">
-                    <div class="sc-qo-header-bar">
-                        <h3 id="sc-qo-title">Quick Order</h3>
-                        <button class="sc-modal-close" onclick="closeQuickOrder()">✕</button>
-                    </div>
-                    <div id="sc-qo-body"></div>
-                </div>
-            </div>
-
-            <!-- Quick Analyse Modal -->
-            <div id="sc-modal" class="sc-modal" style="display:none">
-                <div class="sc-modal-box">
-                    <div class="sc-modal-header">
-                        <h3 id="sc-modal-title">Analysis</h3>
-                        <button onclick="closeModal()" class="sc-modal-close">✕</button>
-                    </div>
-                    <div id="sc-modal-body"></div>
-                </div>
-            </div>
-
         </section>
 
         <!-- ══ PAGE: TRADE ═════════════════════════════════════ -->
@@ -1280,15 +1258,38 @@
 
 </div><!-- /main-wrapper -->
 
+<!-- GLOBAL MODALS -->
+<!-- Quick Order Modal -->
+<div id="sc-qo-modal" class="sc-qo-modal" style="display:none">
+    <div class="sc-qo-box">
+        <div class="sc-qo-header-bar">
+            <h3 id="sc-qo-title">Quick Order</h3>
+            <button class="sc-modal-close" onclick="closeQuickOrder()">✕</button>
+        </div>
+        <div id="sc-qo-body"></div>
+    </div>
+</div>
+
+<!-- Quick Analyse Modal -->
+<div id="sc-modal" class="sc-modal" style="display:none">
+    <div class="sc-modal-box">
+        <div class="sc-modal-header">
+            <h3 id="sc-modal-title">Analysis</h3>
+            <button onclick="closeModal()" class="sc-modal-close">✕</button>
+        </div>
+        <div id="sc-modal-body"></div>
+    </div>
+</div>
+
 <!-- Toast -->
 <div id="toast" class="toast"></div>
 
 <script src="/static/js/app.js?v=2"></script>
 <script src="/static/js/market.js?v=2"></script>
-<script src="/static/js/scanner.js?v=2"></script>
+<script src="/static/js/scanner.js?v=3"></script>
 <script src="/static/js/heatmap.js?v=2"></script>
 <script src="/static/js/trade.js?v=2"></script>
 <script src="/static/js/paper.js?v=2"></script>
-<script src="/static/js/reversals.js?v=1"></script>
+<script src="/static/js/reversals.js?v=2"></script>
 </body>
 </html>

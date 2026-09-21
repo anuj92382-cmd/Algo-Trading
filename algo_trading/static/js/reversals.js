@@ -363,9 +363,10 @@ function renderReversalsTable(list) {
             }
 
             // Targets calculation for Quick Order
-            const risk = Math.max(0.5, ltp - low);
-            const t1 = (ltp + risk * 1.5).toFixed(2);
-            const t2 = (ltp + risk * 2.5).toFixed(2);
+            const buySl = (low > 0 && low < ltp) ? low : +(ltp * 0.99).toFixed(2);
+            const risk = Math.max(0.5, ltp - buySl);
+            const t1 = +(ltp + risk * 1.5).toFixed(2);
+            const t2 = +(ltp + risk * 2.5).toFixed(2);
 
             const displayPrev = (item.prev_high && item.prev_high > 0) ? item.prev_high : prev;
             const prevLabel = (item.prev_high && item.prev_high > 0) ? 'PDH' : 'Close';
@@ -411,7 +412,7 @@ function renderReversalsTable(list) {
                             <button class="btn-sm btn-blue" onclick="openScannerModal('${sym}')" title="Scan with Stock Scanner">
                                 🔬 Scan
                             </button>
-                            <button class="btn-sm btn-green" onclick="quickOrder('${sym}', 'BUY', ${ltp}, ${low}, ${t1}, ${t2})" title="Quick Buy with SL at Low">
+                            <button class="btn-sm btn-green" onclick="quickOrder('${sym}', 'BUY', ${ltp}, ${buySl}, ${t1}, ${t2}, null, 'REVERSAL')" title="Quick Buy with SL at Low">
                                 📈 BUY
                             </button>
                             <button class="btn-sm btn-add" onclick="addToWatchlist('${sym}')" title="Add to Watchlist">
@@ -441,9 +442,10 @@ function renderReversalsTable(list) {
             }
 
             // Targets calculation for Quick Order
-            const risk = Math.max(0.5, high - ltp);
-            const t1 = (ltp - risk * 1.5).toFixed(2);
-            const t2 = (ltp - risk * 2.5).toFixed(2);
+            const sellSl = (high > 0 && high > ltp) ? high : +(ltp * 1.01).toFixed(2);
+            const risk = Math.max(0.5, sellSl - ltp);
+            const t1 = +(ltp - risk * 1.5).toFixed(2);
+            const t2 = +(ltp - risk * 2.5).toFixed(2);
 
             const displayPrev = (item.prev_low && item.prev_low > 0) ? item.prev_low : prev;
             const prevLabel = (item.prev_low && item.prev_low > 0) ? 'PDL' : 'Close';
@@ -489,7 +491,7 @@ function renderReversalsTable(list) {
                             <button class="btn-sm btn-blue" onclick="openScannerModal('${sym}')" title="Scan with Stock Scanner">
                                 🔬 Scan
                             </button>
-                            <button class="btn-sm btn-red" onclick="quickOrder('${sym}', 'SELL', ${ltp}, ${high}, ${t1}, ${t2})" title="Quick Sell with SL at High">
+                            <button class="btn-sm btn-red" onclick="quickOrder('${sym}', 'SELL', ${ltp}, ${sellSl}, ${t1}, ${t2}, null, 'REVERSAL')" title="Quick Sell with SL at High">
                                 📉 SELL
                             </button>
                             <button class="btn-sm btn-add" onclick="addToWatchlist('${sym}')" title="Add to Watchlist">
