@@ -783,10 +783,14 @@
                         <span id="tr-reward-text" class="dim"></span>
                     </div>
 
-                    <!-- Order Value -->
+                    <!-- Order Value & Margin Required -->
                     <div class="tr-value-row">
                         <span class="dim">Est. Order Value:</span>
                         <span id="tr-order-val" class="tr-order-val">₹0</span>
+                    </div>
+                    <div class="tr-margin-row" id="tr-margin-row" style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;margin-bottom:10px;border-bottom:1px dashed var(--border)">
+                        <span class="dim">Margin Required:</span>
+                        <span id="tr-margin-req" style="font-weight:700;color:var(--yellow);font-size:14px">₹0 <small id="tr-margin-lev" style="font-size:10px;color:var(--green);font-weight:600">(5X Intraday)</small></span>
                     </div>
 
                     <!-- Submit Button -->
@@ -1088,6 +1092,7 @@
                         <label>Universe:</label>
                         <select id="rev-universe" class="ctrl-select" onchange="loadReversals()">
                             <option value="all_stocks" selected>🌐 All Stocks (~1,800+ NSE EQ)</option>
+                            <option value="fno">🎯 F&amp;O Stocks Only (~185)</option>
                             <option value="nifty500">🏢 Nifty 500 (~500)</option>
                             <option value="nifty200">📊 Nifty 200 (~200)</option>
                             <option value="nifty100">🏛️ Nifty 100 (~100)</option>
@@ -1115,6 +1120,15 @@
                             <option value="crossed" selected>⚡ Crossed Prev Day (High / Low / Close)</option>
                             <option value="near">⚠️ Near Breakout (Blinking Yellow)</option>
                             <option value="trend">Net Above/Below Prev Day</option>
+                        </select>
+                    </div>
+
+                    <div class="sc-field">
+                        <label>F&amp;O Filter:</label>
+                        <select id="rev-fno-filter" class="ctrl-select" onchange="applyRevClientFilters()">
+                            <option value="all" selected>All Stocks (Any)</option>
+                            <option value="fno_only">🎯 Only F&amp;O Stocks</option>
+                            <option value="non_fno">Non-F&amp;O Stocks</option>
                         </select>
                     </div>
 
@@ -1173,6 +1187,10 @@
                 <div class="hm-sum-item bear">
                     <span class="hm-sum-val red" id="rev-stat-down-count">0</span>
                     <span class="hm-sum-lbl">Down Side Reversals 🔴</span>
+                </div>
+                <div class="hm-sum-item fno">
+                    <span class="hm-sum-val purple" id="rev-stat-fno-count">0</span>
+                    <span class="hm-sum-lbl">🎯 F&amp;O Available</span>
                 </div>
                 <div class="hm-sum-item neut">
                     <span class="hm-sum-val blue" id="rev-stat-total-scanned">0</span>

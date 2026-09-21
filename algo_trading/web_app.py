@@ -815,6 +815,68 @@ def _get_symbol_prev_day(symbol: str, kite, token_map: dict = None) -> dict:
     return {}
 
 
+NSE_FNO_SYMBOLS = {
+    "AARTIIND", "ABB", "ABBOTINDIA", "ABCAPITAL", "ABFRL", "ACC", "ADANIENT",
+    "ADANIPORTS", "ALKEM", "AMBUJACEM", "APOLLOHOSP", "APOLLOTYRE", "ASHOKLEY",
+    "ASIANPAINT", "ASTRAL", "ATUL", "AUBANK", "AUROPHARMA", "AXISBANK",
+    "BAJAJ-AUTO", "BAJAJFINSV", "BAJFINANCE", "BALKRISIND", "BALRAMCHIN",
+    "BANDHANBNK", "BANKBARODA", "BATAINDIA", "BEL", "BERGEPAINT", "BHARATFORG",
+    "BHEL", "BIOCON", "BOSCHLTD", "BPCL", "BRITANNIA", "BSOFT", "CANBK",
+    "CANFINHOME", "CHAMBLFERT", "CHOLAFIN", "CIPLA", "COALINDIA", "COFORGE",
+    "COLPAL", "CONCOR", "COROMANDEL", "CROMPTON", "CUB", "CUMMINSIND", "DABUR",
+    "DALBHARAT", "DEEPAKNTR", "DELHIVERY", "DIVISLAB", "DIXON", "DLF", "DRREDDY",
+    "EICHERMOT", "ESCORTS", "EXIDEIND", "FEDERALBNK", "GAIL", "GLENMARK",
+    "GMRINFRA", "GNFC", "GODREJCP", "GODREJPROP", "GRANULES", "GRASIM",
+    "GUJGASLTD", "HAL", "HAVELLS", "HCLTECH", "HDFCAMC", "HDFCBANK", "HDFCLIFE",
+    "HEROMOTOCO", "HINDALCO", "HINDPETRO", "HINDUNILVR", "ICICIBANK", "ICICIGI",
+    "ICICIPRULI", "IDEA", "IDFCFIRSTB", "IEX", "IGL", "INDHOTEL", "INDIACEM",
+    "INDIAMART", "INDIANB", "INDIGO", "INDUSINDBK", "INDUSTOWER", "INFY", "IOC",
+    "IPCALAB", "IRCTC", "ITC", "JINDALSTEL", "JKCEMENT", "JSWENERGY",
+    "JSWSTEEL", "JUBLFOOD", "KOTAKBANK", "LALPATHLAB", "LAURUSLABS", "LICHSGFIN",
+    "LT", "LTIM", "LTTS", "LUPIN", "M&M", "M&MFIN", "MANAPPURAM", "MARICO",
+    "MARUTI", "MCDOWELL-N", "MCX", "METROPOLIS", "MFSL", "MGL", "MOTHERSON",
+    "MPHASIS", "MRF", "MUTHOOTFIN", "NATIONALUM", "NAUKRI", "NAVINFLUOR",
+    "NESTLEIND", "NMDC", "NTPC", "OBEROIRLTY", "OFSS", "ONGC", "PAGEIND", "PEL",
+    "PERSISTENT", "PETRONET", "PFC", "PIDILITIND", "PIIND", "PNB", "POLYCAB",
+    "POWERGRID", "PRESTIGE", "PVRINOX", "RAMCOCEM", "RBLBANK", "RECLTD",
+    "RELIANCE", "SAIL", "SBICARD", "SBILIFE", "SBIN", "SHREECEM", "SHRIRAMFIN",
+    "SIEMENS", "SRF", "SUNPHARMA", "SUNTV", "SYNGENE", "TATACHEM", "TATACOMM",
+    "TATACONSUM", "TATAMOTORS", "TATAPOWER", "TATASTEEL", "TCS", "TECHM",
+    "TITAN", "TORNTPHARM", "TORNTPOWER", "TRENT", "TVSMOTOR", "UBL",
+    "ULTRACEMCO", "UNIONBANK", "UPL", "VEDL", "VOLTAS", "WIPRO", "ZEEL", "ZYDUSLIFE"
+}
+
+_fno_symbols_cache = set()
+_fno_symbols_cache_time = None
+
+def _get_fno_symbols(kite=None) -> set:
+    """Returns set of NSE Equity tradingsymbols that have active F&O contracts."""
+    global _fno_symbols_cache, _fno_symbols_cache_time
+    now = datetime.now()
+    if _fno_symbols_cache and _fno_symbols_cache_time and (now - _fno_symbols_cache_time).total_seconds() < 86400:
+        return _fno_symbols_cache
+
+    fno_set = set(NSE_FNO_SYMBOLS)
+    if kite:
+        try:
+            nfo_instruments = kite.instruments("NFO")
+            indices = {"NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY", "NIFTYNXT50"}
+            dyn_symbols = {
+                inst.get("name", "").strip().upper()
+                for inst in nfo_instruments
+                if inst.get("name") and inst.get("name").strip().upper() not in indices
+            }
+            if len(dyn_symbols) > 50:
+                fno_set.update(dyn_symbols)
+                logger.info(f"Loaded {len(fno_set)} active F&O equity underlyings from Kite NFO")
+        except Exception as e:
+            logger.debug(f"Kite NFO instruments fetch skipped/failed: {e}")
+
+    _fno_symbols_cache = fno_set
+    _fno_symbols_cache_time = now
+    return _fno_symbols_cache
+
+
 @app.route("/api/market/reversals")
 def api_market_reversals():
     """
@@ -860,6 +922,9 @@ def api_market_reversals():
         except Exception:
             pass
 
+        # F&O symbol lookup
+        fno_set = _get_fno_symbols(kite)
+
         # Batch symbols in chunks of 500
         batch_size = 500
         ohlc_all = {}
@@ -895,6 +960,7 @@ def api_market_reversals():
             day_chg_amt = ltp - prev_close if prev_close > 0 else 0
             day_chg_pct = (day_chg_amt / prev_close * 100) if prev_close > 0 else 0
             rng = high_p - low_p
+            is_fno = bool(sym in fno_set)
 
             # ─────────────────────────────────────────────────────────
             # 1. UP SIDE (Open -> Dip Below Open -> Reversed Above Open)
@@ -957,6 +1023,7 @@ def api_market_reversals():
                         "crossed_break": crossed_break,
                         "break_level": round(benchmark_p, 2),
                         "break_dist_pct": break_dist_pct,
+                        "is_fno": is_fno,
                         "volume": int(item.get("volume", 0) or 0),
                         "rev_strength": rev_strength,
                     })
@@ -1022,6 +1089,7 @@ def api_market_reversals():
                         "crossed_break": crossed_break,
                         "break_level": round(benchmark_p, 2),
                         "break_dist_pct": break_dist_pct,
+                        "is_fno": is_fno,
                         "volume": int(item.get("volume", 0) or 0),
                         "rev_strength": rev_strength,
                     })
@@ -1033,6 +1101,9 @@ def api_market_reversals():
         down_crossed_count = sum(1 for x in down_side if x.get("crossed_break") or x.get("crossed_prev_day"))
         up_near_count = sum(1 for x in up_side if x.get("near_break"))
         down_near_count = sum(1 for x in down_side if x.get("near_break"))
+        up_fno_count = sum(1 for x in up_side if x.get("is_fno"))
+        down_fno_count = sum(1 for x in down_side if x.get("is_fno"))
+        total_fno_count = up_fno_count + down_fno_count
 
         return jsonify({
             "success": True,
@@ -1047,6 +1118,9 @@ def api_market_reversals():
             "down_crossed_count": down_crossed_count,
             "up_near_count": up_near_count,
             "down_near_count": down_near_count,
+            "up_fno_count": up_fno_count,
+            "down_fno_count": down_fno_count,
+            "total_fno_count": total_fno_count,
             "up_side": up_side,
             "down_side": down_side,
             "timestamp": datetime.now(IST_tz).strftime("%I:%M:%S %p"),
@@ -1402,12 +1476,18 @@ def _resolve_symbols(query) -> list:
         "sensex30":          SENSEX30,
         "bse100":            BSE100,
         "watchlist":         INTRADAY_CONFIG["watchlist"],
+        "fno":               sorted(list(NSE_FNO_SYMBOLS)),
     }
 
     if isinstance(query, list):
         return [s.upper().strip() for s in query if s.strip()]
 
     q = query.lower().strip() if isinstance(query, str) else ""
+
+    # F&O Stocks Universe
+    if q in ("fno", "fno_stocks", "nifty_fno", "fno_only"):
+        fno_set = _get_fno_symbols(_state.get("kite"))
+        return sorted(list(fno_set))
 
     # All combined predefined fallback
     all_predefined = list(dict.fromkeys(
@@ -1557,6 +1637,29 @@ def api_trade_place():
         # Save to paper portfolio
         portfolio = _state.get("paper_portfolio")
         if portfolio:
+            # 5X Intraday Margin Check (MIS: 20% margin, CNC: 100%)
+            is_mis = (product.upper() == "MIS")
+            margin_factor = 0.20 if is_mis else 1.0
+            order_val = exec_price * quantity
+            req_margin = order_val * margin_factor
+
+            # Check if this order is closing / reducing an existing position
+            pos = portfolio.positions.get(symbol)
+            is_closing = False
+            if pos:
+                if (pos.quantity > 0 and transaction == "SELL") or (pos.quantity < 0 and transaction == "BUY"):
+                    is_closing = True
+
+            if not is_closing:
+                margin_info = portfolio.get_margin_summary(_state.get("kite"), TOTAL_CAPITAL)
+                avail_margin = margin_info.get("available_margin", TOTAL_CAPITAL)
+                if req_margin > avail_margin:
+                    lev_str = "5X Intraday Margin" if is_mis else "1X Delivery (CNC)"
+                    return jsonify({
+                        "success": False,
+                        "error": f"Insufficient margin! Required: ₹{req_margin:,.2f} ({lev_str}), Available: ₹{avail_margin:,.2f}. Quantity kam karein ya funds badhayein."
+                    })
+
             order_id = portfolio.place_order(
                 symbol=symbol,
                 exchange=exchange,
@@ -1573,17 +1676,23 @@ def api_trade_place():
         else:
             order_id = f"PAPER_{symbol}_{transaction}_{quantity}"
         
+        is_mis = (product.upper() == "MIS")
+        margin_used = (exec_price * quantity) / 5.0 if is_mis else (exec_price * quantity)
+        lev_tag = " [5X Margin: ₹" + f"{margin_used:,.2f}]" if is_mis else ""
+
         return jsonify({
             "success":    True,
             "order_id":   order_id,
             "paper_mode": True,
-            "message":    f"📄 PAPER: {transaction} {quantity} {symbol} @ ₹{exec_price:.2f}",
+            "message":    f"📄 PAPER: {transaction} {quantity} {symbol} @ ₹{exec_price:.2f}{lev_tag}",
             "symbol":     symbol,
             "transaction": transaction,
             "quantity":   quantity,
             "order_type": order_type,
             "product":    product,
             "price":      exec_price,
+            "margin_used": round(margin_used, 2),
+            "leverage":   "5X" if is_mis else "1X",
         })
 
     # Live order
@@ -1822,10 +1931,21 @@ def api_trade_funds():
         return jsonify({"available": 0, "used": 0, "net": 0})
 
     if IS_PAPER_TRADING:
+        portfolio = _state.get("paper_portfolio")
+        if portfolio:
+            summary = portfolio.get_margin_summary(_state.get("kite"), TOTAL_CAPITAL)
+            return jsonify({
+                "available": summary["available_margin"],
+                "used":      summary["used_margin"],
+                "net":       summary["net_capital"],
+                "leverage":  "5X (Intraday MIS)",
+                "paper_mode": True,
+            })
         return jsonify({
             "available": TOTAL_CAPITAL,
             "used":      0,
             "net":       TOTAL_CAPITAL,
+            "leverage":  "5X (Intraday MIS)",
             "paper_mode": True,
         })
 

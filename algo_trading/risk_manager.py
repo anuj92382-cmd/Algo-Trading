@@ -132,16 +132,19 @@ class RiskManager:
         price: float,
         stop_loss: float,
         risk_amount: Optional[float] = None,
+        product: str = "MIS",
     ) -> int:
         """
         Position size calculate karo based on risk.
         
         Formula: Quantity = Risk Amount / (Price - Stop Loss)
+        With 5X leverage for Intraday (MIS).
         
         Args:
             price:       Entry price
             stop_loss:   Stop loss price
             risk_amount: Custom risk amount (default: max_risk_per_trade)
+            product:     "MIS" (5X leverage) or "CNC" (1X)
             
         Returns:
             Quantity (shares)
@@ -157,8 +160,10 @@ class RiskManager:
         # Risk-based quantity
         qty_by_risk = int(risk_amount / risk_per_share)
 
-        # Capital-based max quantity (position size limit)
-        max_position_value = self.current_capital * (self.max_position_pct / 100)
+        # Capital-based max quantity (with 5X leverage for MIS intraday)
+        is_mis = str(product).upper() == "MIS"
+        leverage = 5.0 if is_mis else 1.0
+        max_position_value = self.current_capital * (self.max_position_pct / 100) * leverage
         qty_by_capital = int(max_position_value / price)
 
         # Jo bhi kam ho
@@ -167,7 +172,7 @@ class RiskManager:
 
         logger.debug(
             f"Position size: {qty} shares | Price: ₹{price:.2f} | "
-            f"SL: ₹{stop_loss:.2f} | Risk: ₹{risk_per_share * qty:.2f}"
+            f"SL: ₹{stop_loss:.2f} | Leverage: {leverage}X | Risk: ₹{risk_per_share * qty:.2f}"
         )
         return qty
 
@@ -179,6 +184,7 @@ class RiskManager:
         target: float,
         quantity: int,
         direction: str = "LONG",
+        product: str = "MIS",
     ) -> tuple[bool, str]:
         """
         Trade valid hai check karo.
@@ -210,11 +216,13 @@ class RiskManager:
         if rr < 1.5:
             return False, f"Risk:Reward ratio too low ({rr:.1f}). Minimum 1:1.5 chahiye"
 
-        # 5. Position value check
-        position_value = price * quantity
-        max_allowed = self.current_capital * (self.max_position_pct / 100)
-        if position_value > max_allowed:
-            return False, f"Position value ₹{position_value:,.0f} too high (max ₹{max_allowed:,.0f})"
+        # 5. Position margin check (5X leverage for MIS intraday)
+        is_mis = str(product).upper() == "MIS"
+        margin_required = (price * quantity) / 5.0 if is_mis else (price * quantity)
+        max_allowed_margin = self.current_capital * (self.max_position_pct / 100)
+        if margin_required > max_allowed_margin:
+            lev_lbl = "5X Margin: ₹" if is_mis else "₹"
+            return False, f"Required margin {lev_lbl}{margin_required:,.0f} too high (max allowed ₹{max_allowed_margin:,.0f})"
 
         # 6. Risk amount check
         trade_risk = risk * quantity

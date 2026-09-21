@@ -114,13 +114,18 @@ async function loadReversals() {
         _revData = res;
         _revLoadedOnce = true;
 
+        const upFno = (res.up_fno_count !== undefined) ? res.up_fno_count : (res.up_side || []).filter(x => x.is_fno).length;
+        const downFno = (res.down_fno_count !== undefined) ? res.down_fno_count : (res.down_side || []).filter(x => x.is_fno).length;
+        const totalFno = (res.total_fno_count !== undefined) ? res.total_fno_count : (upFno + downFno);
+
         // Update counts and metadata
         setText('rev-up-count', res.up_count || 0);
         setText('rev-down-count', res.down_count || 0);
-        setText('rev-up-crossed-badge', `⚡ ${res.up_crossed_count || 0} Crossed`);
-        setText('rev-down-crossed-badge', `⚡ ${res.down_crossed_count || 0} Crossed`);
+        setText('rev-up-crossed-badge', `⚡ ${res.up_crossed_count || 0} Crossed • ${res.up_near_count || 0} Near ⚠️ • 🎯 ${upFno} F&O`);
+        setText('rev-down-crossed-badge', `⚡ ${res.down_crossed_count || 0} Crossed • ${res.down_near_count || 0} Near ⚠️ • 🎯 ${downFno} F&O`);
         setText('rev-stat-up-count', res.up_count || 0);
         setText('rev-stat-down-count', res.down_count || 0);
+        setText('rev-stat-fno-count', `${totalFno} (${upFno} Up / ${downFno} Dn)`);
         setText('rev-stat-total-scanned', res.total_scanned || 0);
         setText('rev-timestamp', res.timestamp || '--:--:--');
 
@@ -148,7 +153,7 @@ async function loadReversals() {
         }
 
         if (statusEl) {
-            statusEl.textContent = `Scanned ${res.total_scanned} stocks • ${res.up_count} Up (${res.up_crossed_count || 0} crossed) / ${res.down_count} Down (${res.down_crossed_count || 0} crossed)`;
+            statusEl.textContent = `Scanned ${res.total_scanned} stocks • ${res.up_count} Up (${upFno} F&O) / ${res.down_count} Down (${downFno} F&O)`;
         }
 
         applyRevClientFilters();
@@ -170,6 +175,7 @@ function applyRevClientFilters() {
     const rawList = (_revTab === 'UP') ? (_revData.up_side || []) : (_revData.down_side || []);
     const minPct = parseFloat(document.getElementById('rev-min-pct')?.value || '0');
     const prevFilter = document.getElementById('rev-prev-filter')?.value || 'all';
+    const fnoFilter = document.getElementById('rev-fno-filter')?.value || 'all';
     const sortBy = document.getElementById('rev-sort-by')?.value || 'crossed_first';
     const searchQuery = (document.getElementById('rev-search')?.value || '').trim().toUpperCase();
 
@@ -184,11 +190,17 @@ function applyRevClientFilters() {
 
         // Previous Day Filter
         if (prevFilter === 'crossed') {
-            if (!item.crossed_prev_day) return false;
+            if (!item.crossed_break && !item.crossed_prev_day) return false;
+        } else if (prevFilter === 'near') {
+            if (!item.near_break) return false;
         } else if (prevFilter === 'trend') {
             if (_revTab === 'UP' && !item.is_above_prev_day) return false;
             if (_revTab === 'DOWN' && !item.is_below_prev_day) return false;
         }
+
+        // F&O Filter
+        if (fnoFilter === 'fno_only' && !item.is_fno) return false;
+        if (fnoFilter === 'non_fno' && item.is_fno) return false;
 
         // Search text
         if (searchQuery) {
@@ -363,6 +375,7 @@ function renderReversalsTable(list) {
                     <td class="dim">${rank}</td>
                     <td>
                         <b>${sym}</b>
+                        ${item.is_fno ? '<span class="badge-mini purple" style="margin-left:4px" title="NSE F&O Contract Available">🎯 F&O</span>' : ''}
                         ${item.crossed_break ? '<span class="badge-mini green" style="margin-left:4px" title="Crossed PDH!">🔥</span>' : (item.near_break ? '<span class="badge-mini yellow blink" style="margin-left:4px" title="Near Breakout!">⚡</span>' : '')}
                         <div class="dim" style="font-size:10px;max-width:120px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${item.name || ''}</div>
                     </td>
@@ -436,6 +449,7 @@ function renderReversalsTable(list) {
                     <td class="dim">${rank}</td>
                     <td>
                         <b>${sym}</b>
+                        ${item.is_fno ? '<span class="badge-mini purple" style="margin-left:4px" title="NSE F&O Contract Available">🎯 F&O</span>' : ''}
                         ${item.crossed_break ? '<span class="badge-mini red" style="margin-left:4px" title="Crossed PDL!">💥</span>' : (item.near_break ? '<span class="badge-mini yellow blink" style="margin-left:4px" title="Near Breakdown!">⚡</span>' : '')}
                         <div class="dim" style="font-size:10px;max-width:120px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${item.name || ''}</div>
                     </td>

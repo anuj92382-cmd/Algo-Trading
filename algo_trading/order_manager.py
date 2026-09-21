@@ -399,11 +399,24 @@ class OrderManager:
         """Available margin/funds check karo"""
         if self.is_paper:
             from config import TOTAL_CAPITAL
-            return {
-                "available_cash":   TOTAL_CAPITAL,
-                "used_margin":      0,
-                "available_margin": TOTAL_CAPITAL,
-            }
+            try:
+                p = PaperPortfolio()
+                summary = p.get_margin_summary(self.kite, TOTAL_CAPITAL)
+                return {
+                    "available_cash":   summary["available_margin"],
+                    "used_margin":      summary["used_margin"],
+                    "available_margin": summary["available_margin"],
+                    "net":              summary["net_capital"],
+                    "leverage":         "5X (Intraday MIS)",
+                }
+            except Exception as e:
+                logger.error(f"Paper funds error: {e}")
+                return {
+                    "available_cash":   TOTAL_CAPITAL,
+                    "used_margin":      0,
+                    "available_margin": TOTAL_CAPITAL,
+                    "net":              TOTAL_CAPITAL,
+                }
         try:
             margins = self.kite.margins()
             equity = margins.get("equity", {})
@@ -984,6 +997,54 @@ class PaperPortfolio:
         )
 
         return True
+
+    def get_margin_summary(self, kite=None, total_capital: float = None) -> dict:
+        """
+        Paper trading margin tracker with 5X Intraday (MIS) leverage.
+        - MIS (Intraday): 20% margin requirement (5X Leverage) -> (pos_val / 5.0)
+        - CNC (Delivery): 100% margin requirement (1X Leverage) -> pos_val
+        """
+        if total_capital is None:
+            from config import TOTAL_CAPITAL
+            total_capital = float(TOTAL_CAPITAL)
+
+        used_margin = 0.0
+        open_pnl = 0.0
+
+        live_prices = {}
+        if kite and self.positions:
+            try:
+                instruments = [f"{pos.exchange}:{pos.symbol}" for pos in self.positions.values()]
+                ohlc_data = kite.ohlc(instruments)
+                for key, data in ohlc_data.items():
+                    sym = key.split(":")[1] if ":" in key else key
+                    live_prices[sym] = data.get("last_price", 0)
+            except Exception:
+                pass
+
+        for sym, pos in self.positions.items():
+            ltp = live_prices.get(sym, pos.avg_price)
+            if ltp == 0:
+                ltp = pos.avg_price
+            open_pnl += pos.pnl(ltp)
+            pos_val = abs(pos.quantity) * pos.avg_price
+            if str(pos.product).upper() == "MIS":
+                used_margin += (pos_val / 5.0)  # 5X leverage for intraday
+            else:
+                used_margin += pos_val          # 1X for delivery/CNC
+
+        net_capital = total_capital + self.closed_pnl + open_pnl
+        available_margin = max(0.0, net_capital - used_margin)
+
+        return {
+            "total_capital": round(total_capital, 2),
+            "net_capital": round(net_capital, 2),
+            "used_margin": round(used_margin, 2),
+            "available_margin": round(available_margin, 2),
+            "closed_pnl": round(self.closed_pnl, 2),
+            "open_pnl": round(open_pnl, 2),
+            "leverage_multiplier": 5,
+        }
 
     def reset(self):
         """Portfolio ko reset karo - saare positions aur orders clear"""

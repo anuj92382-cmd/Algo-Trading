@@ -92,6 +92,7 @@ function onProductChange() {
     const prod = document.getElementById('tr-product')?.value || 'MIS';
     const btn  = document.getElementById('tr-submit-btn');
     if (btn) btn.textContent = `${_tradeDir === 'BUY' ? '📈 BUY' : '📉 SELL'} (${prod})`;
+    calcOrderValue();
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -175,6 +176,19 @@ function calcOrderValue() {
     if (valEl) {
         valEl.textContent = val > 0 ? `₹${val.toLocaleString('en-IN', {maximumFractionDigits:2})}` : '₹0';
     }
+
+    // 5X Margin calculation
+    const prod = (document.getElementById('tr-product')?.value || 'MIS').toUpperCase();
+    const isMIS = (prod === 'MIS');
+    const marginReq = isMIS ? (val / 5.0) : val;
+    const marginEl = document.getElementById('tr-margin-req');
+    if (marginEl) {
+        const formattedMargin = marginReq > 0 ? `₹${marginReq.toLocaleString('en-IN', {maximumFractionDigits:2})}` : '₹0';
+        const levText = isMIS
+            ? '<small id="tr-margin-lev" style="font-size:10px;color:var(--green);font-weight:600;margin-left:4px">⚡ 5X Intraday Margin</small>'
+            : '<small id="tr-margin-lev" style="font-size:10px;color:var(--text3);font-weight:600;margin-left:4px">1X CNC (Full Cash)</small>';
+        marginEl.innerHTML = `${formattedMargin} ${levText}`;
+    }
 }
 
 function calcRR() {
@@ -233,6 +247,9 @@ function submitOrder() {
 
     const ltp = _currentQuote?.ltp || price || 0;
     const estVal = qty * (price > 0 ? price : ltp);
+    const isMIS = prod === 'MIS';
+    const marginReq = isMIS ? (estVal / 5.0) : estVal;
+    const marginTag = isMIS ? '<span class="badge-mini green" style="margin-left:4px">⚡ 5X Leverage</span>' : '<span class="badge-mini dim" style="margin-left:4px">1X CNC</span>';
 
     _pendingOrder = { sym, exch, prod, qty, price, trig, sl, tgt };
 
@@ -252,7 +269,7 @@ function submitOrder() {
         `${dirIcon} Confirm ${_tradeDir} Order`;
 
     document.getElementById('tr-modal-body').innerHTML = `
-        ${isPaper ? '<div class="tr-modal-paper">📄 PAPER MODE - No real order</div>' : ''}
+        ${isPaper ? '<div class="tr-modal-paper">📄 PAPER MODE - No real order (5X Intraday Margin)</div>' : ''}
         <div class="tr-conf-grid">
             <div class="tr-conf-row highlight ${dirCls}">
                 <span>Action</span>
@@ -267,8 +284,12 @@ function submitOrder() {
             </div>
             ${trig > 0 ? `<div class="tr-conf-row"><span>Trigger Price</span><span>₹${trig.toFixed(2)}</span></div>` : ''}
             ${slRow}${tgtRow}${rrRow}
+            <div class="tr-conf-row highlight" style="background:rgba(234,179,8,0.12);border-left:3px solid var(--yellow)">
+                <span>Margin Required</span>
+                <span><b style="color:var(--yellow)">₹${marginReq.toLocaleString('en-IN',{maximumFractionDigits:2})}</b> ${marginTag}</span>
+            </div>
             <div class="tr-conf-row total">
-                <span>Est. Value</span>
+                <span>Est. Order Value</span>
                 <span><b>₹${estVal.toLocaleString('en-IN',{maximumFractionDigits:2})}</b></span>
             </div>
         </div>`;
