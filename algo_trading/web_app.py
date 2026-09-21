@@ -770,6 +770,200 @@ def api_market_stocks():
         return jsonify({"error": str(e), "stocks": [], "total": 0})
 
 
+@app.route("/api/market/reversals")
+def api_market_reversals():
+    """
+    Open Reversals Screener API:
+    - Up Side: Stock opened -> dipped below Open (Low < Open) -> reversed and is now trading ABOVE Open (LTP > Open).
+    - Down Side: Stock opened -> rallied above Open (High > Open) -> reversed and is now trading BELOW Open (LTP < Open).
+    """
+    if not _state["kite"]:
+        return jsonify({
+            "success": False,
+            "error": "Not logged in",
+            "up_side": [],
+            "down_side": [],
+            "total_up": 0,
+            "total_down": 0,
+            "scanned": 0,
+        })
+
+    universe   = request.args.get("universe", "all_stocks").strip()
+    min_dip    = float(request.args.get("min_dip", 0.1))     # min % dip below open
+    min_rally  = float(request.args.get("min_rally", 0.1))   # min % rally above open
+    min_price  = float(request.args.get("min_price", 20))
+    max_price  = float(request.args.get("max_price", 50000))
+
+    try:
+        kite = _state["kite"]
+        symbols = _resolve_symbols(universe)
+        if not symbols:
+            symbols = _resolve_symbols("nifty50")
+
+        # Name lookup map
+        name_map = {}
+        try:
+            instruments = kite.instruments("NSE")
+            for inst in instruments:
+                sym = inst.get("tradingsymbol")
+                nm = inst.get("name")
+                if sym and nm:
+                    name_map[sym] = nm
+        except Exception:
+            pass
+
+        # Batch symbols in chunks of 500
+        batch_size = 500
+        ohlc_all = {}
+        formatted_symbols = [f"NSE:{s}" if ":" not in s else s for s in symbols]
+
+        for i in range(0, len(formatted_symbols), batch_size):
+            chunk = formatted_symbols[i:i + batch_size]
+            try:
+                data = kite.ohlc(chunk)
+                if data:
+                    ohlc_all.update(data)
+            except Exception as be:
+                logger.warning(f"Reversals OHLC batch error: {be}")
+
+        up_side = []
+        down_side = []
+
+        for key, item in ohlc_all.items():
+            sym = key.replace("NSE:", "")
+            ltp = float(item.get("last_price", 0) or 0)
+            ohlc = item.get("ohlc", {}) or {}
+            open_p = float(ohlc.get("open", 0) or 0)
+            high_p = float(ohlc.get("high", 0) or 0)
+            low_p  = float(ohlc.get("low", 0) or 0)
+            prev_close = float(ohlc.get("close", 0) or 0)
+
+            # Skip invalid prices or out of price filter
+            if open_p <= 0 or ltp <= 0 or high_p <= 0 or low_p <= 0:
+                continue
+            if ltp < min_price or ltp > max_price:
+                continue
+
+            day_chg_amt = ltp - prev_close if prev_close > 0 else 0
+            day_chg_pct = (day_chg_amt / prev_close * 100) if prev_close > 0 else 0
+            rng = high_p - low_p
+
+            # ─────────────────────────────────────────────────────────
+            # 1. UP SIDE (Open -> Dip Below Open -> Reversed Above Open)
+            # ─────────────────────────────────────────────────────────
+            if low_p < open_p and ltp > open_p:
+                dip_amt = open_p - low_p
+                dip_pct = (dip_amt / open_p) * 100
+                if dip_pct >= min_dip:
+                    gain_vs_open_amt = ltp - open_p
+                    gain_vs_open_pct = (gain_vs_open_amt / open_p) * 100
+                    recovery_from_low_amt = ltp - low_p
+                    recovery_from_low_pct = (recovery_from_low_amt / low_p) * 100
+                    rev_strength = round((ltp - low_p) / rng * 100, 1) if rng > 0 else 50.0
+
+                    crossed_prev_day = bool(prev_close > 0 and low_p <= prev_close and ltp > prev_close)
+                    is_above_prev_day = bool(prev_close > 0 and ltp > prev_close)
+                    prev_diff_pct = round((ltp - prev_close) / prev_close * 100, 2) if prev_close > 0 else 0.0
+
+                    up_side.append({
+                        "symbol": sym,
+                        "name": name_map.get(sym, sym),
+                        "ltp": round(ltp, 2),
+                        "open": round(open_p, 2),
+                        "high": round(high_p, 2),
+                        "low": round(low_p, 2),
+                        "prev_close": round(prev_close, 2),
+                        "dip_amt": round(dip_amt, 2),
+                        "dip_pct": round(dip_pct, 2),
+                        "gain_vs_open_amt": round(gain_vs_open_amt, 2),
+                        "gain_vs_open_pct": round(gain_vs_open_pct, 2),
+                        "recovery_from_low_amt": round(recovery_from_low_amt, 2),
+                        "recovery_from_low_pct": round(recovery_from_low_pct, 2),
+                        "day_change_amt": round(day_chg_amt, 2),
+                        "day_change_pct": round(day_chg_pct, 2),
+                        "change_pct": round(day_chg_pct, 2),
+                        "crossed_prev_day": crossed_prev_day,
+                        "is_above_prev_day": is_above_prev_day,
+                        "prev_diff_pct": prev_diff_pct,
+                        "volume": int(item.get("volume", 0) or 0),
+                        "rev_strength": rev_strength,
+                    })
+
+            # ─────────────────────────────────────────────────────────
+            # 2. DOWN SIDE (Open -> Rally Above Open -> Reversed Below Open)
+            # ─────────────────────────────────────────────────────────
+            elif high_p > open_p and ltp < open_p:
+                rally_amt = high_p - open_p
+                rally_pct = (rally_amt / open_p) * 100
+                if rally_pct >= min_rally:
+                    drop_vs_open_amt = open_p - ltp
+                    drop_vs_open_pct = (drop_vs_open_amt / open_p) * 100
+                    fall_from_high_amt = high_p - ltp
+                    fall_from_high_pct = (fall_from_high_amt / high_p) * 100
+                    rev_strength = round((high_p - ltp) / rng * 100, 1) if rng > 0 else 50.0
+                    crossed_prev_day = bool(prev_close > 0 and high_p >= prev_close and ltp < prev_close)
+                    is_below_prev_day = bool(prev_close > 0 and ltp < prev_close)
+                    prev_diff_pct = round((ltp - prev_close) / prev_close * 100, 2) if prev_close > 0 else 0.0
+
+                    down_side.append({
+                        "symbol": sym,
+                        "name": name_map.get(sym, sym),
+                        "ltp": round(ltp, 2),
+                        "open": round(open_p, 2),
+                        "high": round(high_p, 2),
+                        "low": round(low_p, 2),
+                        "prev_close": round(prev_close, 2),
+                        "rally_amt": round(rally_amt, 2),
+                        "rally_pct": round(rally_pct, 2),
+                        "drop_vs_open_amt": round(drop_vs_open_amt, 2),
+                        "drop_vs_open_pct": round(drop_vs_open_pct, 2),
+                        "fall_from_high_amt": round(fall_from_high_amt, 2),
+                        "fall_from_high_pct": round(fall_from_high_pct, 2),
+                        "day_change_amt": round(day_chg_amt, 2),
+                        "day_change_pct": round(day_chg_pct, 2),
+                        "change_pct": round(day_chg_pct, 2),
+                        "crossed_prev_day": crossed_prev_day,
+                        "is_below_prev_day": is_below_prev_day,
+                        "prev_diff_pct": prev_diff_pct,
+                        "volume": int(item.get("volume", 0) or 0),
+                        "rev_strength": rev_strength,
+                    })
+
+        up_side.sort(key=lambda x: -x["recovery_from_low_pct"])
+        down_side.sort(key=lambda x: -x["fall_from_high_pct"])
+
+        up_crossed_count = sum(1 for x in up_side if x.get("crossed_prev_day"))
+        down_crossed_count = sum(1 for x in down_side if x.get("crossed_prev_day"))
+
+        return jsonify({
+            "success": True,
+            "universe": universe,
+            "scanned": len(ohlc_all),
+            "total_scanned": len(ohlc_all),
+            "total_up": len(up_side),
+            "total_down": len(down_side),
+            "up_count": len(up_side),
+            "down_count": len(down_side),
+            "up_crossed_count": up_crossed_count,
+            "down_crossed_count": down_crossed_count,
+            "up_side": up_side,
+            "down_side": down_side,
+            "timestamp": datetime.now(IST_tz).strftime("%I:%M:%S %p"),
+        })
+
+    except Exception as e:
+        logger.error(f"Reversals error: {e}")
+        return jsonify({
+            "success": False,
+            "error": str(e),
+            "up_side": [],
+            "down_side": [],
+            "total_up": 0,
+            "total_down": 0,
+            "scanned": 0,
+        })
+
+
 @app.route("/api/watchlist/add", methods=["POST"])
 def api_watchlist_add():
     """Symbol ko intraday watchlist mein add karo"""
@@ -938,6 +1132,7 @@ def api_scanner_analyse():
     body      = request.get_json(silent=True) or {}
     symbol    = body.get("symbol", "").upper().strip()
     timeframe = body.get("timeframe", "day")
+    min_score = int(body.get("min_score", 1))
 
     if not symbol:
         return jsonify({"success": False, "error": "Symbol required"})
@@ -956,7 +1151,7 @@ def api_scanner_analyse():
 
         from scanner import StockScanner
         sc     = StockScanner()
-        result = sc.analyse(symbol, "", df, timeframe)
+        result = sc.analyse(symbol, "", df, timeframe, min_score=min_score)
 
         if result:
             return jsonify({"success": True, "signal": result.to_dict()})

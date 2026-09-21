@@ -67,6 +67,11 @@
             <span class="nav-icon">🌡️</span>
             <span class="nav-label">Sector Heatmap</span>
         </a>
+        <a class="nav-item" data-page="reversals" onclick="showPage('reversals')">
+            <span class="nav-icon">🔄</span>
+            <span class="nav-label">Open Reversals</span>
+            <span class="nav-badge green" id="reversals-badge">NEW</span>
+        </a>
     </nav>
 
     <div class="sidebar-bottom">
@@ -1055,6 +1060,192 @@
             </div>
         </section>
 
+        <!-- ══════════════════════════════════════════════════
+             OPEN REVERSALS SCREENER
+        ═══════════════════════════════════════════════════ -->
+        <section id="page-reversals" class="page">
+            <div class="page-header">
+                <div>
+                    <h2>🔄 Open Reversals Screener</h2>
+                    <span style="font-size:12px;color:var(--text3)">
+                        Real-time intraday reversal detector (Up Side & Down Side after Open)
+                    </span>
+                </div>
+                <div class="page-actions">
+                    <span class="info-pill" id="rev-timestamp">--:--:--</span>
+                    <label class="toggle-wrap" title="Auto Refresh every 10s" style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer">
+                        <input type="checkbox" id="rev-auto-refresh" onchange="toggleRevAutoRefresh(this.checked)">
+                        <span>Auto (10s)</span>
+                    </label>
+                    <button class="btn btn-blue" id="rev-refresh-btn" onclick="loadReversals()">🔄 Scan Now</button>
+                </div>
+            </div>
+
+            <!-- Controls bar -->
+            <div class="sc-controls-card" style="margin-bottom:16px">
+                <div class="sc-ctrl-row" style="display:flex;flex-wrap:wrap;gap:12px;align-items:center">
+                    <div class="sc-field">
+                        <label>Universe:</label>
+                        <select id="rev-universe" class="ctrl-select" onchange="loadReversals()">
+                            <option value="all_stocks" selected>🌐 All Stocks (~1,800+ NSE EQ)</option>
+                            <option value="nifty500">🏢 Nifty 500 (~500)</option>
+                            <option value="nifty200">📊 Nifty 200 (~200)</option>
+                            <option value="nifty100">🏛️ Nifty 100 (~100)</option>
+                            <option value="nifty50">⚡ Nifty 50 (~50)</option>
+                            <option value="banknifty">🏦 Bank Nifty (~15)</option>
+                            <option value="finnifty">💳 Fin Nifty (~20)</option>
+                            <option value="all_sectors">🏭 All Sector Stocks (~200)</option>
+                        </select>
+                    </div>
+
+                    <div class="sc-field">
+                        <label>Min Dip / Rally %:</label>
+                        <select id="rev-min-pct" class="ctrl-select" onchange="applyRevClientFilters()">
+                            <option value="0">All Reversals (&gt; 0%)</option>
+                            <option value="0.2" selected>Min 0.2% Dip / Rally</option>
+                            <option value="0.5">Min 0.5% Dip / Rally</option>
+                            <option value="1.0">Min 1.0% Significant Reversal</option>
+                        </select>
+                    </div>
+
+                    <div class="sc-field">
+                        <label>Prev Day Filter:</label>
+                        <select id="rev-prev-filter" class="ctrl-select" onchange="applyRevClientFilters()">
+                            <option value="all">All Reversals (Any)</option>
+                            <option value="crossed" selected>⚡ Crossed Prev Day (Cross Up / Down)</option>
+                            <option value="trend">Net Above/Below Prev Day</option>
+                        </select>
+                    </div>
+
+                    <div class="sc-field">
+                        <label>Sort By:</label>
+                        <select id="rev-sort-by" class="ctrl-select" onchange="applyRevClientFilters()">
+                            <option value="crossed_first" selected>⚡ Crossed Prev Day First</option>
+                            <option value="gain_drop">Current Move vs Open (%)</option>
+                            <option value="recovery">Recovery / Drop Magnitude (%)</option>
+                            <option value="dip_rally">Dip / Rally Size (%)</option>
+                            <option value="day_change">Total Day Change (%)</option>
+                            <option value="volume">Volume (Highest First)</option>
+                        </select>
+                    </div>
+
+                    <div class="sc-field" style="flex:1;min-width:180px">
+                        <label>Search Symbol:</label>
+                        <input type="text" id="rev-search" class="ctrl-input" placeholder="Search symbol or name..." oninput="applyRevClientFilters()" style="width:100%">
+                    </div>
+                </div>
+            </div>
+
+            <!-- Dual Tab Selector -->
+            <div class="rev-tabs-header">
+                <button class="rev-tab-btn bull active" id="tab-btn-up" onclick="switchRevTab('UP')">
+                    <div class="rev-tab-title">
+                        <span class="tab-icon">🚀</span>
+                        <span>Up Side (Dip &amp; Surge)</span>
+                    </div>
+                    <div class="rev-tab-meta">
+                        <span class="rev-tab-sub">Open &gt; Low &amp; LTP &gt; Open</span>
+                        <span class="badge-count green" id="rev-up-count">0</span>
+                        <span class="badge-count yellow" id="rev-up-crossed-badge" title="Crossed Previous Day to Upside" style="font-size:11px;padding:2px 8px">⚡ 0 Crossed</span>
+                    </div>
+                </button>
+
+                <button class="rev-tab-btn bear" id="tab-btn-down" onclick="switchRevTab('DOWN')">
+                    <div class="rev-tab-title">
+                        <span class="tab-icon">📉</span>
+                        <span>Down Side (Rally &amp; Dump)</span>
+                    </div>
+                    <div class="rev-tab-meta">
+                        <span class="rev-tab-sub">Open &lt; High &amp; LTP &lt; Open</span>
+                        <span class="badge-count red" id="rev-down-count">0</span>
+                        <span class="badge-count yellow" id="rev-down-crossed-badge" title="Crossed Previous Day to Downside" style="font-size:11px;padding:2px 8px">⚡ 0 Crossed</span>
+                    </div>
+                </button>
+            </div>
+
+            <!-- Summary KPI Strip -->
+            <div class="hm-summary" style="margin-top:12px;margin-bottom:16px">
+                <div class="hm-sum-item bull">
+                    <span class="hm-sum-val green" id="rev-stat-up-count">0</span>
+                    <span class="hm-sum-lbl">Up Side Reversals 🟢</span>
+                </div>
+                <div class="hm-sum-item bear">
+                    <span class="hm-sum-val red" id="rev-stat-down-count">0</span>
+                    <span class="hm-sum-lbl">Down Side Reversals 🔴</span>
+                </div>
+                <div class="hm-sum-item neut">
+                    <span class="hm-sum-val blue" id="rev-stat-total-scanned">0</span>
+                    <span class="hm-sum-lbl">Total Scanned 📋</span>
+                </div>
+                <div class="hm-sum-item best">
+                    <span class="hm-sum-val green" id="rev-stat-top-bull">--</span>
+                    <span class="hm-sum-lbl">🏆 Strongest Recovery</span>
+                </div>
+                <div class="hm-sum-item worst">
+                    <span class="hm-sum-val red" id="rev-stat-top-bear">--</span>
+                    <span class="hm-sum-lbl">⚠️ Deepest Rejection</span>
+                </div>
+            </div>
+
+            <!-- Table Container -->
+            <div class="panel">
+                <div class="panel-header" style="display:flex;justify-content:space-between;align-items:center">
+                    <h3 id="rev-active-tab-title">🚀 Up Side Reversals (Open &gt; Low &amp; LTP &gt; Open)</h3>
+                    <span class="dim" style="font-size:12px" id="rev-table-status">Ready</span>
+                </div>
+                <div class="table-wrap" style="max-height:560px;overflow-y:auto">
+                    <table class="paper-table">
+                        <thead id="rev-table-head">
+                            <tr>
+                                <th>#</th>
+                                <th>Symbol</th>
+                                <th>Open ₹</th>
+                                <th>Low (Dip %)</th>
+                                <th>High ₹</th>
+                                <th>LTP ₹</th>
+                                <th>Gain vs Open %</th>
+                                <th>Recovery %</th>
+                                <th>Day Chg %</th>
+                                <th style="min-width:130px">Intraday Position</th>
+                                <th>Volume</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="rev-table-body">
+                            <tr><td colspan="12" class="empty">Click "Scan Now" to scan reversals</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Stock Scanner Modal for Reversals -->
+            <div id="rev-scan-modal" class="sc-modal" style="display:none">
+                <div class="sc-modal-box">
+                    <div class="sc-modal-header">
+                        <div style="display:flex;align-items:center;gap:10px">
+                            <span style="font-size:22px">🔬</span>
+                            <div>
+                                <h3 id="rev-scan-modal-title" style="margin:0;font-size:16px">Stock Technical Scanner</h3>
+                                <div id="rev-scan-modal-sub" style="font-size:11px;color:var(--text3)">Deep Indicator Analysis &amp; Trade Levels</div>
+                            </div>
+                        </div>
+                        <div style="display:flex;align-items:center;gap:8px">
+                            <select id="rev-scan-modal-tf" class="ctrl-select" style="font-size:12px;padding:5px 8px" onchange="reRunScanModal()">
+                                <option value="day" selected>Daily (Swing)</option>
+                                <option value="60minute">60 Min</option>
+                                <option value="15minute">15 Min (Intraday)</option>
+                                <option value="5minute">5 Min (Scalp)</option>
+                            </select>
+                            <button onclick="closeRevScanModal()" class="sc-modal-close" title="Close Modal">✕</button>
+                        </div>
+                    </div>
+                    <div id="rev-scan-modal-body" class="sc-modal-body" style="padding:16px">
+                        <!-- Loaded dynamically -->
+                    </div>
+                </div>
+            </div>
+        </section>
+
     </main><!-- /content-area -->
 
     <!-- STATUS BAR -->
@@ -1079,5 +1270,6 @@
 <script src="/static/js/heatmap.js?v=2"></script>
 <script src="/static/js/trade.js?v=2"></script>
 <script src="/static/js/paper.js?v=2"></script>
+<script src="/static/js/reversals.js?v=1"></script>
 </body>
 </html>

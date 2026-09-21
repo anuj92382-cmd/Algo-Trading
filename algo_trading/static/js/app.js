@@ -68,6 +68,7 @@ function showPage(name) {
         orders:    'Orders',
         scanner:   '🔬 Stock Scanner',
         sectors:   '🌡️ Sector Heatmap',
+        reversals: '🔄 Open Reversals Screener',
         trade:     '💹 Trade - Buy / Sell',
     };
     setText('pageTitle', titles[name] || name);
@@ -78,6 +79,7 @@ function showPage(name) {
     if (name === 'trades')    fetchTrades();
     if (name === 'orders')    fetchOrders();
     if (name === 'sectors')   loadHeatmap();
+    if (name === 'reversals') initReversalsPage();
     if (name === 'trade')     initTradePage();
 }
 

@@ -277,7 +277,7 @@ class StockScanner:
     MIN_RR       = 1.5   # Minimum risk:reward ratio
 
     def analyse(self, symbol: str, name: str, df: pd.DataFrame,
-                timeframe: str = "day") -> Optional[ScanResult]:
+                timeframe: str = "day", min_score: Optional[int] = None) -> Optional[ScanResult]:
         """
         Ek stock ka complete analysis karo.
         Returns ScanResult agar strong signal mila, else None.
@@ -356,21 +356,33 @@ class StockScanner:
         short_score, short_reasons, short_warns = self._score_short(c, c1, v)
 
         # ── Decide direction ──────────────────────────────
+        effective_min_score = min_score if min_score is not None else self.MIN_SCORE
         direction = None
         score     = 0
         reasons   = []
         warnings  = []
 
-        if long_score >= self.MIN_SCORE and long_score >= short_score:
+        if long_score >= effective_min_score and long_score >= short_score:
             direction = "LONG"
             score     = long_score
             reasons   = long_reasons
             warnings  = long_warns
-        elif short_score >= self.MIN_SCORE:
+        elif short_score >= effective_min_score:
             direction = "SHORT"
             score     = short_score
             reasons   = short_reasons
             warnings  = short_warns
+        elif effective_min_score <= 1:
+            if long_score >= short_score:
+                direction = "LONG"
+                score     = long_score
+                reasons   = long_reasons
+                warnings  = long_warns
+            else:
+                direction = "SHORT"
+                score     = short_score
+                reasons   = short_reasons
+                warnings  = short_warns
 
         if not direction:
             return None   # No strong signal
@@ -388,9 +400,15 @@ class StockScanner:
 
             risk       = entry - stop_loss
             if risk <= 0:
-                return None
+                risk = max(1.0, round(entry * 0.015, 2))
+                stop_loss = round(entry - risk, 2)
 
-            signal_type = "STRONG BUY" if score >= 8 else "BUY"
+            if score >= 8:
+                signal_type = "STRONG BUY"
+            elif score >= 6:
+                signal_type = "BUY"
+            else:
+                signal_type = "WATCH / NEUTRAL (LONG)"
 
         else:  # SHORT
             entry     = round(c, 2)
@@ -401,9 +419,15 @@ class StockScanner:
 
             risk        = stop_loss - entry
             if risk <= 0:
-                return None
+                risk = max(1.0, round(entry * 0.015, 2))
+                stop_loss = round(entry + risk, 2)
 
-            signal_type = "STRONG SELL" if score >= 8 else "SELL"
+            if score >= 8:
+                signal_type = "STRONG SELL"
+            elif score >= 6:
+                signal_type = "SELL"
+            else:
+                signal_type = "WATCH / NEUTRAL (SHORT)"
 
         # ── Targets (1:1.5, 1:2, 1:3) ────────────────────
         if direction == "LONG":
@@ -417,13 +441,16 @@ class StockScanner:
 
         # ── R:R check ─────────────────────────────────────
         best_rr = 3.0  # We always offer 1:3 target
-        if best_rr < self.MIN_RR:
-            return None
 
         risk_pct = round(risk / entry * 100, 2)
 
         # ── Confidence level ──────────────────────────────
-        confidence = "HIGH 🔥" if score >= 8 else "MEDIUM ✅"
+        if score >= 8:
+            confidence = "HIGH 🔥"
+        elif score >= 6:
+            confidence = "MEDIUM ✅"
+        else:
+            confidence = "LOW / NEUTRAL ⚪"
 
         return ScanResult(
             symbol=symbol, name=name,
