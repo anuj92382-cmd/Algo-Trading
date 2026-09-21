@@ -141,8 +141,16 @@ function stockRow(s, rank, type, hasLive = true) {
     if (type === 'stock') {
         return `<tr>
             <td class="dim">${rank}</td>
-            <td><b>${s.symbol}</b></td>
-            <td class="dim" style="max-width:140px;overflow:hidden;text-overflow:ellipsis" title="${s.name || ''}">${nameStr}</td>
+            <td>
+                <a href="https://in.tradingview.com/chart/?symbol=NSE:${encodeURIComponent(s.symbol)}" target="_blank" rel="noopener noreferrer" class="tv-chart-link" title="Open ${s.symbol} chart on TradingView (New Tab)">
+                    <b>${s.symbol}</b><span class="tv-icon">↗</span>
+                </a>
+            </td>
+            <td class="dim" style="max-width:140px;overflow:hidden;text-overflow:ellipsis" title="${s.name || ''}">
+                <a href="https://in.tradingview.com/chart/?symbol=NSE:${encodeURIComponent(s.symbol)}" target="_blank" rel="noopener noreferrer" class="tv-name-link">
+                    ${nameStr}
+                </a>
+            </td>
             <td class="dim">${s.prev_close > 0 ? '₹'+s.prev_close.toFixed(2) : '--'}</td>
             <td><b>${ltpStr}</b></td>
             <td>${chgAmtStr}</td>
@@ -156,8 +164,16 @@ function stockRow(s, rank, type, hasLive = true) {
     } else {
         return `<tr>
             <td class="dim">${rank}</td>
-            <td><b>${s.symbol}</b></td>
-            <td class="dim" style="max-width:140px;overflow:hidden;text-overflow:ellipsis" title="${s.name || ''}">${nameStr}</td>
+            <td>
+                <a href="https://in.tradingview.com/chart/?symbol=NSE:${encodeURIComponent(s.symbol)}" target="_blank" rel="noopener noreferrer" class="tv-chart-link" title="Open ${s.symbol} chart on TradingView (New Tab)">
+                    <b>${s.symbol}</b><span class="tv-icon">↗</span>
+                </a>
+            </td>
+            <td class="dim" style="max-width:140px;overflow:hidden;text-overflow:ellipsis" title="${s.name || ''}">
+                <a href="https://in.tradingview.com/chart/?symbol=NSE:${encodeURIComponent(s.symbol)}" target="_blank" rel="noopener noreferrer" class="tv-name-link">
+                    ${nameStr}
+                </a>
+            </td>
             <td><b>${ltpStr}</b></td>
             <td>${chgAmtStr}</td>
             <td>${chgStr}</td>

@@ -361,3 +361,14 @@ function showToast(msg, cls = 'toast-info') {
     t.className   = `toast ${cls} show`;
     setTimeout(() => { t.className = 'toast'; }, 3000);
 }
+
+function getTradingViewUrl(symbol, exchange = 'NSE') {
+    if (!symbol) return 'https://in.tradingview.com/chart/';
+    const clean = String(symbol).trim().toUpperCase().replace('NSE:', '').replace('BSE:', '');
+    return `https://in.tradingview.com/chart/?symbol=${exchange}:${encodeURIComponent(clean)}`;
+}
+
+function openTradingView(symbol, exchange = 'NSE') {
+    const url = getTradingViewUrl(symbol, exchange);
+    window.open(url, '_blank', 'noopener,noreferrer');
+}

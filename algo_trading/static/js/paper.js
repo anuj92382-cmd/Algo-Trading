@@ -113,7 +113,11 @@ function renderPaperPositions(positions) {
 
         return `
 <tr data-symbol="${pos.symbol}">
-    <td><b>${pos.symbol}</b></td>
+    <td>
+        <a href="https://in.tradingview.com/chart/?symbol=${pos.exchange || 'NSE'}:${encodeURIComponent(pos.symbol)}" target="_blank" rel="noopener noreferrer" class="tv-chart-link" title="Open ${pos.symbol} chart on TradingView (New Tab)">
+            <b>${pos.symbol}</b><span class="tv-icon">↗</span>
+        </a>
+    </td>
     <td>${qtyIcon} ${Math.abs(pos.quantity)}</td>
     <td>₹${pos.avg_price.toFixed(2)}</td>
     <td class="paper-ltp" data-sym="${pos.symbol}">₹${pos.ltp.toFixed(2)}</td>

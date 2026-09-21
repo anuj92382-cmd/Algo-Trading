@@ -454,7 +454,11 @@ async function loadTradePositions() {
         const sym   = p.tradingsymbol || '';
 
         return `<tr>
-            <td><b>${sym}</b></td>
+            <td>
+                <a href="https://in.tradingview.com/chart/?symbol=${exch}:${encodeURIComponent(sym)}" target="_blank" rel="noopener noreferrer" class="tv-chart-link" title="Open ${sym} chart on TradingView (New Tab)">
+                    <b>${sym}</b><span class="tv-icon">↗</span>
+                </a>
+            </td>
             <td class="${qty>0?'green':'red'}">${qty}</td>
             <td class="dim">₹${avg.toFixed(2)}</td>
             <td><b>₹${ltp.toFixed(2)}</b></td>
@@ -506,7 +510,11 @@ async function loadHoldings() {
         const sym    = h.tradingsymbol || '';
 
         return `<tr>
-            <td><b>${sym}</b></td>
+            <td>
+                <a href="https://in.tradingview.com/chart/?symbol=NSE:${encodeURIComponent(sym)}" target="_blank" rel="noopener noreferrer" class="tv-chart-link" title="Open ${sym} chart on TradingView (New Tab)">
+                    <b>${sym}</b><span class="tv-icon">↗</span>
+                </a>
+            </td>
             <td>${qty}</td>
             <td class="dim">₹${avg.toFixed(2)}</td>
             <td><b>₹${ltp.toFixed(2)}</b></td>

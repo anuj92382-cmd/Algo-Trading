@@ -270,8 +270,12 @@ function signalCard(r) {
 <div class="sc-card ${dirCls}">
     <div class="sc-card-head">
         <div class="sc-card-left">
-            <span class="sc-symbol">${r.symbol}</span>
-            <span class="sc-name">${(r.name || '').substring(0,20)}</span>
+            <a href="https://in.tradingview.com/chart/?symbol=NSE:${encodeURIComponent(r.symbol)}" target="_blank" rel="noopener noreferrer" class="tv-chart-link" title="Open ${r.symbol} chart on TradingView (New Tab)">
+                <span class="sc-symbol">${r.symbol}</span><span class="tv-icon">↗</span>
+            </a>
+            <a href="https://in.tradingview.com/chart/?symbol=NSE:${encodeURIComponent(r.symbol)}" target="_blank" rel="noopener noreferrer" class="tv-name-link" title="Open ${r.symbol} chart on TradingView (New Tab)">
+                <span class="sc-name">${(r.name || '').substring(0,20)}</span>
+            </a>
         </div>
         <div class="sc-card-right">
             <span class="sc-dir-badge ${dirCls}">${dirIcon} ${r.direction}</span>

@@ -187,7 +187,11 @@ async function loadSectorDetail(sectorName) {
         const hasLtp = s.ltp > 0;
 
         return `<tr>
-            <td><b>${s.symbol}</b></td>
+            <td>
+                <a href="https://in.tradingview.com/chart/?symbol=NSE:${encodeURIComponent(s.symbol)}" target="_blank" rel="noopener noreferrer" class="tv-chart-link" title="Open ${s.symbol} chart on TradingView (New Tab)">
+                    <b>${s.symbol}</b><span class="tv-icon">↗</span>
+                </a>
+            </td>
             <td>${hasLtp ? '₹' + s.ltp.toFixed(2) : '--'}</td>
             <td class="${cc}"><b>${hasLtp ? sign + chg.toFixed(2) + '%' : '--'}</b></td>
             <td class="dim">${s.open  > 0 ? '₹' + s.open.toFixed(2)  : '--'}</td>

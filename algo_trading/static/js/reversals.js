@@ -374,10 +374,14 @@ function renderReversalsTable(list) {
                 <tr class="${rowClass}">
                     <td class="dim">${rank}</td>
                     <td>
-                        <b>${sym}</b>
+                        <a href="https://in.tradingview.com/chart/?symbol=NSE:${encodeURIComponent(sym)}" target="_blank" rel="noopener noreferrer" class="tv-chart-link" title="Open ${sym} chart on TradingView (New Tab)">
+                            <b>${sym}</b><span class="tv-icon">↗</span>
+                        </a>
                         ${item.is_fno ? '<span class="badge-mini purple" style="margin-left:4px" title="NSE F&O Contract Available">🎯 F&O</span>' : ''}
                         ${item.crossed_break ? '<span class="badge-mini green" style="margin-left:4px" title="Crossed PDH!">🔥</span>' : (item.near_break ? '<span class="badge-mini yellow blink" style="margin-left:4px" title="Near Breakout!">⚡</span>' : '')}
-                        <div class="dim" style="font-size:10px;max-width:120px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${item.name || ''}</div>
+                        <a href="https://in.tradingview.com/chart/?symbol=NSE:${encodeURIComponent(sym)}" target="_blank" rel="noopener noreferrer" class="tv-name-link" title="Open ${sym} chart on TradingView (New Tab)">
+                            <div style="font-size:10px;max-width:120px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${item.name || ''}</div>
+                        </a>
                     </td>
                     <td class="dim" title="${prevLabel}: ₹${displayPrev.toFixed(2)}">
                         <b>₹${displayPrev > 0 ? displayPrev.toFixed(2) : '--'}</b>
@@ -448,10 +452,14 @@ function renderReversalsTable(list) {
                 <tr class="${rowClass}">
                     <td class="dim">${rank}</td>
                     <td>
-                        <b>${sym}</b>
+                        <a href="https://in.tradingview.com/chart/?symbol=NSE:${encodeURIComponent(sym)}" target="_blank" rel="noopener noreferrer" class="tv-chart-link" title="Open ${sym} chart on TradingView (New Tab)">
+                            <b>${sym}</b><span class="tv-icon">↗</span>
+                        </a>
                         ${item.is_fno ? '<span class="badge-mini purple" style="margin-left:4px" title="NSE F&O Contract Available">🎯 F&O</span>' : ''}
                         ${item.crossed_break ? '<span class="badge-mini red" style="margin-left:4px" title="Crossed PDL!">💥</span>' : (item.near_break ? '<span class="badge-mini yellow blink" style="margin-left:4px" title="Near Breakdown!">⚡</span>' : '')}
-                        <div class="dim" style="font-size:10px;max-width:120px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${item.name || ''}</div>
+                        <a href="https://in.tradingview.com/chart/?symbol=NSE:${encodeURIComponent(sym)}" target="_blank" rel="noopener noreferrer" class="tv-name-link" title="Open ${sym} chart on TradingView (New Tab)">
+                            <div style="font-size:10px;max-width:120px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${item.name || ''}</div>
+                        </a>
                     </td>
                     <td class="dim" title="${prevLabel}: ₹${displayPrev.toFixed(2)}">
                         <b>₹${displayPrev > 0 ? displayPrev.toFixed(2) : '--'}</b>
