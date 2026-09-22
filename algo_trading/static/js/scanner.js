@@ -266,6 +266,11 @@ function signalCard(r) {
     const rrCol    = r.rr_ratio >= 3 ? 'var(--green)' : r.rr_ratio >= 2 ? 'var(--blue)' : 'var(--yellow)';
     const riskAmt  = Math.abs(r.entry - r.stop_loss).toFixed(2);
 
+    const entry = r.entry || r.ltp || 0;
+    const t1Gain = r.target1_pct !== undefined ? r.target1_pct.toFixed(1) : (entry > 0 && r.target1 ? ((Math.abs(r.target1 - entry) / entry) * 100).toFixed(1) : '0.0');
+    const t2Gain = r.target2_pct !== undefined ? r.target2_pct.toFixed(1) : (entry > 0 && r.target2 ? ((Math.abs(r.target2 - entry) / entry) * 100).toFixed(1) : '0.0');
+    const t3Gain = r.target3_pct !== undefined ? r.target3_pct.toFixed(1) : (entry > 0 && r.target3 ? ((Math.abs(r.target3 - entry) / entry) * 100).toFixed(1) : '0.0');
+
     return `
 <div class="sc-card ${dirCls}">
     <div class="sc-card-head">
@@ -296,30 +301,38 @@ function signalCard(r) {
         <div class="sc-level-item">
             <div class="sc-level-lbl">LTP</div>
             <div class="sc-level-val">₹${r.ltp?.toFixed(2)}</div>
+            <div class="sc-level-sub dim" style="font-weight:700">Live</div>
+            <div class="sc-level-ratio">Price</div>
         </div>
         <div class="sc-level-item">
             <div class="sc-level-lbl">⚡ Entry</div>
             <div class="sc-level-val green">₹${r.entry?.toFixed(2)}</div>
+            <div class="sc-level-sub dim" style="font-weight:700">Trigger</div>
+            <div class="sc-level-ratio">0.0%</div>
         </div>
         <div class="sc-level-item">
             <div class="sc-level-lbl">🛑 Stop Loss</div>
             <div class="sc-level-val red">₹${r.stop_loss?.toFixed(2)}</div>
-            <div class="sc-level-sub red">-${r.risk_pct?.toFixed(1)}%</div>
+            <div class="sc-level-sub red" style="font-weight:700">-${r.risk_pct?.toFixed(1)}%</div>
+            <div class="sc-level-ratio">1R Risk</div>
         </div>
         <div class="sc-level-item">
             <div class="sc-level-lbl">🎯 Target 1</div>
             <div class="sc-level-val" style="color:#fbbf24">₹${r.target1?.toFixed(2)}</div>
-            <div class="sc-level-sub dim">1:1.5</div>
+            <div class="sc-level-sub green" style="font-weight:700">+${t1Gain}%</div>
+            <div class="sc-level-ratio">1:1.5</div>
         </div>
         <div class="sc-level-item">
             <div class="sc-level-lbl">🎯 Target 2</div>
             <div class="sc-level-val" style="color:#34d399">₹${r.target2?.toFixed(2)}</div>
-            <div class="sc-level-sub dim">1:2</div>
+            <div class="sc-level-sub green" style="font-weight:700">+${t2Gain}%</div>
+            <div class="sc-level-ratio">1:2</div>
         </div>
         <div class="sc-level-item">
             <div class="sc-level-lbl">🎯 Target 3</div>
             <div class="sc-level-val green">₹${r.target3?.toFixed(2)}</div>
-            <div class="sc-level-sub green">1:3</div>
+            <div class="sc-level-sub green" style="font-weight:700">+${t3Gain}%</div>
+            <div class="sc-level-ratio">1:3</div>
         </div>
     </div>
 
@@ -481,12 +494,12 @@ function quickOrder(symbol, direction, entry, sl, t1, t2, t3, tag) {
         <div class="qo-level-item">
             <div class="qo-level-lbl">🎯 Target 1</div>
             <div class="qo-level-val" style="color:#fbbf24">₹${fmt(numT1)}</div>
-            <div class="qo-level-sub dim">+${t1Diff}%</div>
+            <div class="qo-level-sub green">+${t1Diff}%</div>
         </div>
         <div class="qo-level-item">
             <div class="qo-level-lbl">🎯 Target 2</div>
             <div class="qo-level-val" style="color:#34d399">₹${fmt(numT2)}</div>
-            <div class="qo-level-sub dim">+${t2Diff}%</div>
+            <div class="qo-level-sub green">+${t2Diff}%</div>
         </div>
     </div>
 

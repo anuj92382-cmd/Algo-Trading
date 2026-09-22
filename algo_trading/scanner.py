@@ -77,6 +77,18 @@ class ScanResult:
         return abs(self.target1 - self.entry)
 
     @property
+    def target1_pct(self) -> float:
+        return abs(self.target1 - self.entry) / self.entry * 100 if self.entry > 0 else 0.0
+
+    @property
+    def target2_pct(self) -> float:
+        return abs(self.target2 - self.entry) / self.entry * 100 if self.entry > 0 else 0.0
+
+    @property
+    def target3_pct(self) -> float:
+        return abs(self.target3 - self.entry) / self.entry * 100 if self.entry > 0 else 0.0
+
+    @property
     def best_rr(self) -> str:
         """Best R:R ratio string"""
         r = self.rr_ratio
@@ -98,6 +110,9 @@ class ScanResult:
             "target2":        round(self.target2, 2),
             "target3":        round(self.target3, 2),
             "risk_pct":       round(self.risk_pct, 2),
+            "target1_pct":    round(self.target1_pct, 2),
+            "target2_pct":    round(self.target2_pct, 2),
+            "target3_pct":    round(self.target3_pct, 2),
             "rr_ratio":       round(self.rr_ratio, 2),
             "best_rr":        self.best_rr,
             "score":          self.score,
