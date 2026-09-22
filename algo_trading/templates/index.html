@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Algo Trading Dashboard</title>
-    <link rel="stylesheet" href="/static/css/style.css?v=3">
+    <link rel="stylesheet" href="/static/css/style.css?v=4">
 </head>
 <body>
 
@@ -1046,151 +1046,152 @@
              OPEN REVERSALS SCREENER
         ═══════════════════════════════════════════════════ -->
         <section id="page-reversals" class="page">
-            <div class="page-header">
-                <div>
-                    <h2>🔄 Open Reversals Screener</h2>
-                    <span style="font-size:12px;color:var(--text3)">
-                        Real-time intraday reversal detector (Up Side & Down Side after Open)
-                    </span>
+            <div class="page-header rev-header">
+                <div class="rev-header-left">
+                    <h2 class="rev-title">🔄 Open Reversals Screener</h2>
+                    <span class="rev-subtitle">Intraday Reversal Detector</span>
                 </div>
                 <div class="page-actions">
                     <span class="info-pill" id="rev-timestamp">--:--:--</span>
-                    <label class="toggle-wrap" title="Auto Refresh every 10s" style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer">
+                    <label class="toggle-wrap" title="Auto Refresh every 10s">
                         <input type="checkbox" id="rev-auto-refresh" onchange="toggleRevAutoRefresh(this.checked)">
                         <span>Auto (10s)</span>
                     </label>
-                    <button class="btn btn-blue" id="rev-refresh-btn" onclick="loadReversals()">🔄 Scan Now</button>
+                    <button class="btn btn-blue btn-sm" id="rev-refresh-btn" onclick="loadReversals()">🔄 Scan Now</button>
                 </div>
             </div>
 
-            <!-- Controls bar -->
-            <div class="sc-controls-card" style="margin-bottom:16px">
-                <div class="sc-ctrl-row" style="display:flex;flex-wrap:wrap;gap:12px;align-items:center">
-                    <div class="sc-field">
-                        <label>Universe:</label>
-                        <select id="rev-universe" class="ctrl-select" onchange="loadReversals()">
-                            <option value="all_stocks" selected>🌐 All Stocks (~1,800+ NSE EQ)</option>
-                            <option value="fno">🎯 F&amp;O Stocks Only (~185)</option>
-                            <option value="nifty500">🏢 Nifty 500 (~500)</option>
-                            <option value="nifty200">📊 Nifty 200 (~200)</option>
-                            <option value="nifty100">🏛️ Nifty 100 (~100)</option>
-                            <option value="nifty50">⚡ Nifty 50 (~50)</option>
-                            <option value="banknifty">🏦 Bank Nifty (~15)</option>
-                            <option value="finnifty">💳 Fin Nifty (~20)</option>
-                            <option value="all_sectors">🏭 All Sector Stocks (~200)</option>
-                        </select>
-                    </div>
+            <!-- Ultra-Compact Filter Toolbar -->
+            <div class="rev-filter-bar">
+                <div class="rev-filter-group">
+                    <label>Universe:</label>
+                    <select id="rev-universe" class="ctrl-select" onchange="loadReversals()">
+                        <option value="all_stocks" selected>🌐 All Stocks (~1,800+ NSE EQ)</option>
+                        <option value="fno">🎯 F&amp;O Stocks Only (~185)</option>
+                        <option value="nifty500">🏢 Nifty 500 (~500)</option>
+                        <option value="nifty200">📊 Nifty 200 (~200)</option>
+                        <option value="nifty100">🏛️ Nifty 100 (~100)</option>
+                        <option value="nifty50">⚡ Nifty 50 (~50)</option>
+                        <option value="banknifty">🏦 Bank Nifty (~15)</option>
+                        <option value="finnifty">💳 Fin Nifty (~20)</option>
+                        <option value="all_sectors">🏭 All Sector Stocks (~200)</option>
+                    </select>
+                </div>
 
-                    <div class="sc-field">
-                        <label>Min Dip / Rally %:</label>
-                        <select id="rev-min-pct" class="ctrl-select" onchange="applyRevClientFilters()">
-                            <option value="0">All Reversals (&gt; 0%)</option>
-                            <option value="0.2" selected>Min 0.2% Dip / Rally</option>
-                            <option value="0.5">Min 0.5% Dip / Rally</option>
-                            <option value="1.0">Min 1.0% Significant Reversal</option>
-                        </select>
-                    </div>
+                <div class="rev-filter-group">
+                    <label>Min Move:</label>
+                    <select id="rev-min-pct" class="ctrl-select" onchange="applyRevClientFilters()">
+                        <option value="0">All Reversals (&gt; 0%)</option>
+                        <option value="0.2" selected>Min 0.2% Dip / Rally</option>
+                        <option value="0.5">Min 0.5% Dip / Rally</option>
+                        <option value="1.0">Min 1.0% Significant Reversal</option>
+                    </select>
+                </div>
 
-                    <div class="sc-field">
-                        <label>Prev Day Filter:</label>
-                        <select id="rev-prev-filter" class="ctrl-select" onchange="applyRevClientFilters()">
-                            <option value="all">All Reversals (Any)</option>
-                            <option value="crossed" selected>⚡ Crossed Prev Day (High / Low / Close)</option>
-                            <option value="near">⚠️ Near Breakout (Blinking Yellow)</option>
-                            <option value="trend">Net Above/Below Prev Day</option>
-                        </select>
-                    </div>
+                <div class="rev-filter-group">
+                    <label>Prev Day:</label>
+                    <select id="rev-prev-filter" class="ctrl-select" onchange="applyRevClientFilters()">
+                        <option value="all">All Reversals (Any)</option>
+                        <option value="crossed" selected>⚡ Crossed Prev Day</option>
+                        <option value="near">⚠️ Near Breakout</option>
+                        <option value="trend">Above / Below Prev Day</option>
+                    </select>
+                </div>
 
-                    <div class="sc-field">
-                        <label>F&amp;O Filter:</label>
-                        <select id="rev-fno-filter" class="ctrl-select" onchange="applyRevClientFilters()">
-                            <option value="all" selected>All Stocks (Any)</option>
-                            <option value="fno_only">🎯 Only F&amp;O Stocks</option>
-                            <option value="non_fno">Non-F&amp;O Stocks</option>
-                        </select>
-                    </div>
+                <div class="rev-filter-group">
+                    <label>F&amp;O:</label>
+                    <select id="rev-fno-filter" class="ctrl-select" onchange="applyRevClientFilters()">
+                        <option value="all" selected>All Stocks (Any)</option>
+                        <option value="fno_only">🎯 Only F&amp;O Stocks</option>
+                        <option value="non_fno">Non-F&amp;O Stocks</option>
+                    </select>
+                </div>
 
-                    <div class="sc-field">
-                        <label>Sort By:</label>
-                        <select id="rev-sort-by" class="ctrl-select" onchange="applyRevClientFilters()">
-                            <option value="crossed_first" selected>⚡ Crossed Prev Day First</option>
-                            <option value="gain_drop">Current Move vs Open (%)</option>
-                            <option value="recovery">Recovery / Drop Magnitude (%)</option>
-                            <option value="dip_rally">Dip / Rally Size (%)</option>
-                            <option value="day_change">Total Day Change (%)</option>
-                            <option value="volume">Volume (Highest First)</option>
-                        </select>
-                    </div>
+                <div class="rev-filter-group">
+                    <label>Sort:</label>
+                    <select id="rev-sort-by" class="ctrl-select" onchange="applyRevClientFilters()">
+                        <option value="crossed_first" selected>⚡ Crossed Prev Day First</option>
+                        <option value="gain_drop">Current Move vs Open (%)</option>
+                        <option value="recovery">Recovery / Drop Magnitude (%)</option>
+                        <option value="dip_rally">Dip / Rally Size (%)</option>
+                        <option value="day_change">Total Day Change (%)</option>
+                        <option value="volume">Volume (Highest First)</option>
+                    </select>
+                </div>
 
-                    <div class="sc-field" style="flex:1;min-width:180px">
-                        <label>Search Symbol:</label>
-                        <input type="text" id="rev-search" class="ctrl-input" placeholder="Search symbol or name..." oninput="applyRevClientFilters()" style="width:100%">
-                    </div>
+                <div class="rev-filter-group rev-search-group">
+                    <input type="text" id="rev-search" class="ctrl-input" placeholder="🔍 Search symbol or name..." oninput="applyRevClientFilters()">
                 </div>
             </div>
 
-            <!-- Dual Tab Selector -->
+            <!-- Dual Tab Selector (Compact) -->
             <div class="rev-tabs-header">
-                <button class="rev-tab-btn bull active" id="tab-btn-up" onclick="switchRevTab('UP')">
+                <button class="rev-tab-btn bull active" id="tab-btn-up" onclick="switchRevTab('UP')" title="Switch to Up Side Reversals">
                     <div class="rev-tab-title">
                         <span class="tab-icon">🚀</span>
-                        <span>Up Side (Dip &amp; Surge)</span>
+                        <span>Up Side</span>
+                        <span class="rev-tab-sub">(Dip &amp; Surge)</span>
                     </div>
                     <div class="rev-tab-meta">
-                        <span class="rev-tab-sub">Open &gt; Low &amp; LTP &gt; Open</span>
                         <span class="badge-count green" id="rev-up-count">0</span>
-                        <span class="badge-count yellow" id="rev-up-crossed-badge" title="Crossed Previous Day to Upside" style="font-size:11px;padding:2px 8px">⚡ 0 Crossed</span>
+                        <span class="badge-count yellow" id="rev-up-crossed-badge" title="Crossed Previous Day to Upside">⚡ 0 Crossed</span>
                     </div>
                 </button>
 
-                <button class="rev-tab-btn bear" id="tab-btn-down" onclick="switchRevTab('DOWN')">
+                <button class="rev-tab-btn bear" id="tab-btn-down" onclick="switchRevTab('DOWN')" title="Switch to Down Side Reversals">
                     <div class="rev-tab-title">
                         <span class="tab-icon">📉</span>
-                        <span>Down Side (Rally &amp; Dump)</span>
+                        <span>Down Side</span>
+                        <span class="rev-tab-sub">(Rally &amp; Dump)</span>
                     </div>
                     <div class="rev-tab-meta">
-                        <span class="rev-tab-sub">Open &lt; High &amp; LTP &lt; Open</span>
                         <span class="badge-count red" id="rev-down-count">0</span>
-                        <span class="badge-count yellow" id="rev-down-crossed-badge" title="Crossed Previous Day to Downside" style="font-size:11px;padding:2px 8px">⚡ 0 Crossed</span>
+                        <span class="badge-count yellow" id="rev-down-crossed-badge" title="Crossed Previous Day to Downside">⚡ 0 Crossed</span>
                     </div>
                 </button>
             </div>
 
-            <!-- Summary KPI Strip -->
-            <div class="hm-summary" style="margin-top:12px;margin-bottom:16px">
-                <div class="hm-sum-item bull">
-                    <span class="hm-sum-val green" id="rev-stat-up-count">0</span>
-                    <span class="hm-sum-lbl">Up Side Reversals 🟢</span>
+            <!-- Single-Row Compact KPI Strip -->
+            <div class="rev-stats-strip">
+                <div class="rev-stat-pill bull">
+                    <span class="rev-stat-dot green">●</span>
+                    <span class="rev-stat-title">Up Side:</span>
+                    <b class="rev-stat-num green" id="rev-stat-up-count">0</b>
                 </div>
-                <div class="hm-sum-item bear">
-                    <span class="hm-sum-val red" id="rev-stat-down-count">0</span>
-                    <span class="hm-sum-lbl">Down Side Reversals 🔴</span>
+                <div class="rev-stat-pill bear">
+                    <span class="rev-stat-dot red">●</span>
+                    <span class="rev-stat-title">Down Side:</span>
+                    <b class="rev-stat-num red" id="rev-stat-down-count">0</b>
                 </div>
-                <div class="hm-sum-item fno">
-                    <span class="hm-sum-val purple" id="rev-stat-fno-count">0</span>
-                    <span class="hm-sum-lbl">🎯 F&amp;O Available</span>
+                <div class="rev-stat-pill fno">
+                    <span class="rev-stat-dot purple">🎯</span>
+                    <span class="rev-stat-title">F&amp;O:</span>
+                    <b class="rev-stat-num purple" id="rev-stat-fno-count">0</b>
                 </div>
-                <div class="hm-sum-item neut">
-                    <span class="hm-sum-val blue" id="rev-stat-total-scanned">0</span>
-                    <span class="hm-sum-lbl">Total Scanned 📋</span>
+                <div class="rev-stat-pill neut">
+                    <span class="rev-stat-dot blue">📋</span>
+                    <span class="rev-stat-title">Scanned:</span>
+                    <b class="rev-stat-num blue" id="rev-stat-total-scanned">0</b>
                 </div>
-                <div class="hm-sum-item best">
-                    <span class="hm-sum-val green" id="rev-stat-top-bull">--</span>
-                    <span class="hm-sum-lbl">🏆 Strongest Recovery</span>
+                <div class="rev-stat-pill best" title="Strongest Recovery from Low">
+                    <span class="rev-stat-dot green">🏆</span>
+                    <span class="rev-stat-title">Recovery:</span>
+                    <b class="rev-stat-num green" id="rev-stat-top-bull">--</b>
                 </div>
-                <div class="hm-sum-item worst">
-                    <span class="hm-sum-val red" id="rev-stat-top-bear">--</span>
-                    <span class="hm-sum-lbl">⚠️ Deepest Rejection</span>
+                <div class="rev-stat-pill worst" title="Deepest Rejection from High">
+                    <span class="rev-stat-dot red">⚠️</span>
+                    <span class="rev-stat-title">Rejection:</span>
+                    <b class="rev-stat-num red" id="rev-stat-top-bear">--</b>
                 </div>
             </div>
 
             <!-- Table Container -->
-            <div class="panel">
-                <div class="panel-header" style="display:flex;justify-content:space-between;align-items:center">
+            <div class="panel rev-panel">
+                <div class="panel-header rev-panel-header">
                     <h3 id="rev-active-tab-title">🚀 Up Side Reversals (Open &gt; Low &amp; LTP &gt; Open)</h3>
                     <span class="dim" style="font-size:12px" id="rev-table-status">Ready</span>
                 </div>
-                <div class="table-wrap" style="max-height:560px;overflow-y:auto">
+                <div class="table-wrap rev-table-wrap">
                     <table class="paper-table">
                         <thead id="rev-table-head">
                             <tr>
