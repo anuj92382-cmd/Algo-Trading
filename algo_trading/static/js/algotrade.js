@@ -697,6 +697,23 @@ async function fetchAlgoTrades() {
     }
 }
 
+async function clearAlgoTrades() {
+    if (!confirm('Are you sure you want to clear the completed trades history?')) return;
+    try {
+        const res = await fetch('/api/algo/trades/clear', { method: 'POST' });
+        const data = await res.json();
+        if (data.success) {
+            showToast('Trades history cleared!', 'info');
+            fetchAlgoTrades();
+        } else {
+            showToast(data.error || 'Failed to clear trades', 'error');
+        }
+    } catch (e) {
+        showToast('Error clearing trades', 'error');
+    }
+}
+
+
 function renderAlgoTradesTable(trades) {
     const tbody = document.getElementById('algo-trades-tbody');
     const badge = document.getElementById('algo-closed-trades-count');

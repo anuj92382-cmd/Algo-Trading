@@ -1513,8 +1513,12 @@
                         <h3>📑 Completed Algo Trades</h3>
                         <span class="badge-mini blue" id="algo-closed-trades-count">0 Closed</span>
                     </div>
-                    <button class="btn btn-sm btn-grey" onclick="fetchAlgoTrades()">🔄 Refresh Trades</button>
+                    <div style="display:flex;align-items:center;gap:6px">
+                        <button class="btn btn-sm btn-grey" onclick="fetchAlgoTrades()">🔄 Refresh</button>
+                        <button class="btn btn-sm btn-grey" onclick="clearAlgoTrades()" title="Clear completed trades list">🧹 Clear Trades</button>
+                    </div>
                 </div>
+
                 <div class="table-wrap">
                     <table>
                         <thead>

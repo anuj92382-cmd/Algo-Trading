@@ -607,6 +607,16 @@ def api_algo_trades():
     return jsonify(engine.get_closed_trades(limit=limit))
 
 
+@app.route("/api/algo/trades/clear", methods=["POST"])
+def api_algo_trades_clear():
+    """Clear completed trades history"""
+    engine = _state.get("algo_engine")
+    if not engine:
+        return jsonify({"success": False, "error": "Algo engine not initialized"})
+    return jsonify(engine.clear_closed_trades())
+
+
+
 @app.route("/api/algo/logs")
 def api_algo_logs():
     """Live streaming terminal logs from the autonomous engine"""

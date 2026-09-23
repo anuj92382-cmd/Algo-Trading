@@ -15,6 +15,7 @@ Key Concepts Implemented:
 import os
 import json
 import time
+import random
 import logging
 import threading
 from collections import deque
@@ -22,6 +23,7 @@ from datetime import datetime, date, time as dtime
 from typing import Dict, List, Optional, Any
 from pathlib import Path
 import pytz
+
 
 logger = logging.getLogger("algo_engine")
 IST = pytz.timezone("Asia/Kolkata")
@@ -1184,6 +1186,15 @@ class AlgoEngine:
         with self._lock:
             return self.closed_trades[:limit]
 
+    def clear_closed_trades(self) -> dict:
+        """Clears completed trades history."""
+        with self._lock:
+            self.closed_trades.clear()
+            self._save_state()
+            self._log("INFO", "🧹 Completed trades history cleared by user.")
+            return {"success": True, "message": "Trades history cleared successfully."}
+
+
     def get_recent_logs(self, limit: int = 150) -> List[dict]:
         """Returns recent activity logs."""
         with self._lock:
@@ -1257,26 +1268,64 @@ class AlgoEngine:
         return {"success": True, "message": "Demo simulation started! Watch live terminal and positions table."}
 
     def _demo_simulation_worker(self):
-        """Simulates live tick movement over 15-20 seconds for demonstration."""
+        """Simulates live tick movement over 15-20 seconds for demonstration with dynamic stocks & strategies."""
         try:
-            sym = "TATASTEEL"
-            entry_p = 150.0
-            qty = 400
-            t1 = 151.50   # +1.0%
-            t2 = 153.00   # +2.0%
-            sl = 148.80   # -0.8%
-            margin_used = (entry_p * qty) / 5.0
+            candidates = [
+                {"symbol": "TATAMOTORS", "base_price": 975.0,  "strategy_id": "momentum_trend"},
+                {"symbol": "RELIANCE",   "base_price": 2980.0, "strategy_id": "breakout_surge"},
+                {"symbol": "INFY",       "base_price": 1820.0, "strategy_id": "rsi_reversion"},
+                {"symbol": "HDFCBANK",   "base_price": 1645.0, "strategy_id": "open_reversal"},
+                {"symbol": "ICICIBANK",  "base_price": 1250.0, "strategy_id": "supertrend_rider"},
+                {"symbol": "TCS",        "base_price": 4210.0, "strategy_id": "momentum_trend"},
+                {"symbol": "SBIN",       "base_price": 785.0,  "strategy_id": "breakout_surge"},
+                {"symbol": "BHARTIARTL", "base_price": 1550.0, "strategy_id": "momentum_trend"},
+                {"symbol": "TATASTEEL",  "base_price": 152.0,  "strategy_id": "open_reversal"},
+                {"symbol": "ITC",        "base_price": 492.0,  "strategy_id": "rsi_reversion"},
+            ]
 
-            self._log("ALERT", "🧪 [DEMO SIMULATION STARTED] 24/7 Off-Market Live Robot Testing", "Simulating live trade cycle...")
+            active_syms = {p["symbol"] for p in self.active_positions.values()}
+            available = [c for c in candidates if c["symbol"] not in active_syms]
+            cand = random.choice(available if available else candidates)
+
+            sym = cand["symbol"]
+            strat_id = cand.get("strategy_id", "momentum_trend")
+            strat = self.strategies.get(strat_id, self.strategies.get("momentum_trend", {}))
+            strat_name = f"{strat.get('name', 'Algo Strategy')} (Demo)"
+
+            # Resolve entry price: check live quote if kite is available, else base_price
+            entry_p = float(cand["base_price"])
+            kite = self._web_state.get("kite")
+            if kite:
+                try:
+                    q = kite.quote([f"NSE:{sym}"])
+                    live_p = float(q.get(f"NSE:{sym}", {}).get("last_price", 0) or 0)
+                    if live_p > 10.0:
+                        entry_p = round(live_p, 2)
+                except Exception:
+                    pass
+
+            t1_pct = float(strat.get("target_1_pct", 1.0))
+            t2_pct = float(strat.get("target_2_pct", 2.0))
+            sl_pct = float(strat.get("sl_pct", 0.8))
+            trail_pct = float(strat.get("trailing_sl_pct", 0.3))
+            capital = float(strat.get("capital_per_trade", 20000.0))
+
+            qty = max(1, int((capital * 5.0) / entry_p))
+            t1 = round(entry_p * (1.0 + t1_pct / 100.0), 2)
+            t2 = round(entry_p * (1.0 + t2_pct / 100.0), 2)
+            sl = round(entry_p * (1.0 - sl_pct / 100.0), 2)
+            margin_used = round((entry_p * qty) / 5.0, 2)
+
+            self._log("ALERT", f"🧪 [DEMO SIMULATION] Live Robot Testing on {sym}", f"Strategy: {strat_name} | Capital: ₹{capital:,.0f} (5X)")
             time.sleep(1.0)
 
-            self._log("SCAN", "Scanning universe symbols... evaluating EMA & Reversal setups")
+            self._log("SCAN", f"Scanning universe symbols... technical setup triggered on {sym}")
             time.sleep(1.5)
 
-            self._log("SIGNAL", f"🎯 [Momentum Trend] Signal Detected on {sym} @ ₹{entry_p:.2f}", "Fast EMA(9) crossed Slow EMA(21) | Price > VWAP")
+            self._log("SIGNAL", f"🎯 [{strat_name}] Signal Detected on {sym} @ ₹{entry_p:.2f}", f"Target 1: +{t1_pct}% | Target 2: +{t2_pct}% | SL: -{sl_pct}%")
             time.sleep(1.0)
 
-            self._log("RMS", f"🛡️ RMS Check Approved: Daily P&L OK, Open Pos: 1/4 | Margin: ₹{margin_used:,.2f} (5X)")
+            self._log("RMS", f"🛡️ RMS Check Approved: Daily P&L OK, Open Pos: {len(self.active_positions)+1}/4 | Margin: ₹{margin_used:,.2f} (5X)")
             time.sleep(0.8)
 
             pos_id = f"POS_SIM_{sym}_{int(time.time())}"
@@ -1285,8 +1334,8 @@ class AlgoEngine:
                     "pos_id": pos_id,
                     "order_id": f"SIM_ORD_{int(time.time())}",
                     "symbol": sym,
-                    "strategy_id": "momentum_trend",
-                    "strategy_name": "Momentum Trend (Demo)",
+                    "strategy_id": strat_id,
+                    "strategy_name": strat_name,
                     "side": "BUY",
                     "product": "MIS",
                     "quantity": qty,
@@ -1301,7 +1350,7 @@ class AlgoEngine:
                     "target": t1,
                     "target_1_hit": False,
                     "trailing_sl": sl,
-                    "trailing_step_pct": 0.3,
+                    "trailing_step_pct": trail_pct,
                     "margin_used": margin_used,
                     "pnl": 0.0,
                     "pnl_pct": 0.0,
@@ -1313,55 +1362,61 @@ class AlgoEngine:
                 self._record_equity_point()
 
             self._log("ORDER", f"⚡ [AUTO BUY] EXECUTED: {qty} Qty {sym} @ ₹{entry_p:.2f} (5X Margin: ₹{margin_used:,.2f})",
-                      f"T1: ₹{t1:.2f} (+1.0%, 50% Qty) | T2: ₹{t2:.2f} (+2.0%) | SL: ₹{sl:.2f} (-0.8%)")
+                      f"T1: ₹{t1:.2f} (+{t1_pct}%, 50% Qty) | T2: ₹{t2:.2f} (+{t2_pct}%) | SL: ₹{sl:.2f} (-{sl_pct}%)")
 
-            # Tick 1: Price rises to 150.60
+            # Tick 1: Price rises 40% towards T1
             time.sleep(3.0)
             with self._lock:
                 if pos_id in self.active_positions:
-                    self.active_positions[pos_id]["current_price"] = 150.60
+                    p1 = round(entry_p * (1.0 + (t1_pct * 0.40) / 100.0), 2)
+                    self.active_positions[pos_id]["current_price"] = p1
                     self._monitor_active_positions()
                     self._recalculate_stats()
                     self._record_equity_point()
 
-            # Tick 2: Price rises to 151.10 -> Trailing SL ratchets up
+            # Tick 2: Price rises 75% towards T1 -> Trailing SL ratchets up
             time.sleep(3.0)
             with self._lock:
                 if pos_id in self.active_positions:
-                    self.active_positions[pos_id]["current_price"] = 151.10
+                    p2 = round(entry_p * (1.0 + (t1_pct * 0.75) / 100.0), 2)
+                    self.active_positions[pos_id]["current_price"] = p2
                     self._monitor_active_positions()
                     self._recalculate_stats()
                     self._record_equity_point()
 
-            # Tick 3: Price hits Target 1 (151.60 >= 151.50) -> Partial 50% exit & SL moved to Cost!
+            # Tick 3: Price hits Target 1 -> Partial 50% exit & SL moved to Cost!
             time.sleep(3.5)
             with self._lock:
                 if pos_id in self.active_positions:
-                    self.active_positions[pos_id]["current_price"] = 151.60
+                    p3 = round(entry_p * (1.0 + (t1_pct * 1.05) / 100.0), 2)
+                    self.active_positions[pos_id]["current_price"] = p3
                     self._monitor_active_positions()
                     self._recalculate_stats()
                     self._record_equity_point()
 
-            # Tick 4: Price surges further to 152.40 with Trailing SL
+            # Tick 4: Price surges further towards T2 with Trailing SL
             time.sleep(3.5)
             with self._lock:
                 if pos_id in self.active_positions:
-                    self.active_positions[pos_id]["current_price"] = 152.40
+                    p4 = round(entry_p * (1.0 + (t1_pct + (t2_pct - t1_pct) * 0.55) / 100.0), 2)
+                    self.active_positions[pos_id]["current_price"] = p4
                     self._monitor_active_positions()
                     self._recalculate_stats()
                     self._record_equity_point()
 
-            # Tick 5: Price reaches Target 2 (153.20 >= 153.00) -> Final Target Exit!
+            # Tick 5: Price reaches Target 2 -> Final Target Exit!
             time.sleep(3.5)
             with self._lock:
                 if pos_id in self.active_positions:
-                    self.active_positions[pos_id]["current_price"] = 153.20
+                    p5 = round(entry_p * (1.0 + (t2_pct * 1.05) / 100.0), 2)
+                    self.active_positions[pos_id]["current_price"] = p5
                     self._monitor_active_positions()
                     self._recalculate_stats()
                     self._record_equity_point()
 
-            self._log("ALERT", "🎉 [DEMO SIMULATION COMPLETE] All targets hit!", "Both T1 (50% booked + Risk-Free) and T2 executed successfully.")
+            self._log("ALERT", f"🎉 [DEMO SIMULATION COMPLETE] All targets hit on {sym}!", f"Both T1 (50% booked + Risk-Free) and T2 executed successfully.")
             self._save_state()
+
 
         except Exception as e:
             logger.error(f"Demo simulation error: {e}", exc_info=True)
