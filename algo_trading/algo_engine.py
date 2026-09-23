@@ -124,13 +124,16 @@ def calculate_setup_win_rate(
     low_p: float,
     prev_close: float,
     target_1_pct: float = 1.0,
-    sl_pct: float = 0.8
+    sl_pct: float = 0.8,
+    avg_price: float = 0.0,
 ) -> dict:
     """
     Computes a quantitative Win Rate / Probability Score (0.0% to 100.0%) for an intraday technical setup.
     Orders are ONLY executed when the setup win rate is >= min_win_rate_pct (default: 60.0%).
     """
     base_rates = {
+        "vwap_sniper": 65.0,        # Institutional VWAP Demand Zone Rebound (High Edge)
+        "orb_breakout": 63.0,       # 15-Minute Opening Range Expansion Breakout
         "breakout_surge": 62.0,
         "momentum_trend": 58.0,
         "supertrend_rider": 59.0,
@@ -159,7 +162,10 @@ def calculate_setup_win_rate(
             elif pos_ratio >= 0.70:
                 score += 3.0
             elif pos_ratio < 0.45: # Weak setup trading in bottom half
-                score -= 8.0
+                if strat_id != "vwap_sniper":
+                    score -= 8.0
+            elif strat_id == "vwap_sniper" and 0.45 <= pos_ratio <= 0.80:
+                score += 4.0  # Optimal wholesale value zone for institutional pullback
         else: # SELL / SHORT
             if pos_ratio <= 0.15:
                 score += 5.5
@@ -193,6 +199,12 @@ def calculate_setup_win_rate(
             score += 2.5
         elif side == "SELL" and open_gain < -0.3:
             score += 2.5
+
+    # 5. VWAP / ATP proximity bonus (Institutional confluence)
+    if avg_price > 0:
+        vwap_dist = abs(ltp - avg_price) / avg_price * 100.0
+        if vwap_dist <= 0.50:
+            score += 4.5
 
     final_score = round(max(10.0, min(95.0, score)), 1)
     return {
@@ -330,6 +342,42 @@ class AlgoEngine:
                 "capital_per_trade": 20000.0,
                 "product": "MIS",
                 "side": "BOTH",
+                "signals_count": 0,
+            },
+            "vwap_sniper": {
+                "id": "vwap_sniper",
+                "name": "VWAP Institutional Pullback",
+                "badge": "VWAP Value Dip",
+                "desc": "Buys high-probability pullbacks into the institutional VWAP demand zone with tight SL.",
+                "icon": "💎",
+                "enabled": True,
+                "timeframe": "5m",
+                "target_pct": 1.5,
+                "target_1_pct": 1.0,           # Target 1: Book 50% Qty & Move SL to Cost
+                "target_2_pct": 2.0,           # Target 2: Final 50% Runner
+                "sl_pct": 0.5,                 # Tight 0.5% SL below VWAP shelf
+                "trailing_sl_pct": 0.25,
+                "capital_per_trade": 20000.0,
+                "product": "MIS",              # MIS uses 5X leverage
+                "side": "BUY_ONLY",
+                "signals_count": 0,
+            },
+            "orb_breakout": {
+                "id": "orb_breakout",
+                "name": "ORB 15-Min Breakout",
+                "badge": "15m Range Break",
+                "desc": "Opening Range 15-minute high breakout with institutional volume and VWAP support.",
+                "icon": "⚡",
+                "enabled": True,
+                "timeframe": "15m",
+                "target_pct": 1.8,
+                "target_1_pct": 1.2,
+                "target_2_pct": 2.2,
+                "sl_pct": 0.7,
+                "trailing_sl_pct": 0.3,
+                "capital_per_trade": 20000.0,
+                "product": "MIS",
+                "side": "BUY_ONLY",
                 "signals_count": 0,
             },
         }
@@ -944,6 +992,8 @@ class AlgoEngine:
             high_p = float(item.get("high", 0) or 0)
             low_p = float(item.get("low", 0) or 0)
             prev_close = float(item.get("close", 0) or 0)
+            avg_price = float(item.get("avg_price", 0) or 0)
+            volume = int(item.get("volume", 0) or 0)
 
             if open_p <= 0 or ltp <= 20.0 or ltp > 50000.0:
                 continue
@@ -953,7 +1003,7 @@ class AlgoEngine:
                 if not strat.get("enabled", True):
                     continue
 
-                signal = self._evaluate_strategy(strat_id, sym, ltp, open_p, high_p, low_p, prev_close)
+                signal = self._evaluate_strategy(strat_id, sym, ltp, open_p, high_p, low_p, prev_close, avg_price, volume)
                 if signal:
                     # Calculate Setup Win Rate Score %
                     t1_pct = float(strat.get("target_1_pct", strat.get("target_pct", 1.0)))
@@ -970,6 +1020,7 @@ class AlgoEngine:
                         prev_close=prev_close,
                         target_1_pct=t1_pct,
                         sl_pct=sl_pct,
+                        avg_price=avg_price,
                     )
                     win_rate = wr_info["win_rate"]
                     signal["win_rate"] = win_rate
@@ -999,7 +1050,18 @@ class AlgoEngine:
     # QUANTITATIVE STRATEGY RULES EVALUATOR
     # ─────────────────────────────────────────────────────────────
 
-    def _evaluate_strategy(self, strat_id: str, symbol: str, ltp: float, open_p: float, high_p: float, low_p: float, prev_close: float) -> Optional[dict]:
+    def _evaluate_strategy(
+        self,
+        strat_id: str,
+        symbol: str,
+        ltp: float,
+        open_p: float,
+        high_p: float,
+        low_p: float,
+        prev_close: float,
+        avg_price: float = 0.0,
+        volume: int = 0
+    ) -> Optional[dict]:
         """
         Evaluates mathematical criteria for each strategy.
         Returns a signal dict if conditions are met, otherwise None.
@@ -1082,6 +1144,40 @@ class AlgoEngine:
                         "ltp": ltp,
                         "reason": f"Sustained directional uptrend (+{chg:.1f}% with trend support)",
                     }
+
+        # 6. VWAP INSTITUTIONAL PULLBACK SNIPER (💎 VWAP Sniper - High Accuracy)
+        elif strat_id == "vwap_sniper":
+            vwap = avg_price if avg_price > 0 else (open_p + high_p + low_p) / 3.0
+            if vwap > 0 and prev_close > 0 and ltp > prev_close and ltp > open_p:
+                day_chg = ((ltp - prev_close) / prev_close) * 100.0
+                dist_from_vwap = ((ltp - vwap) / vwap) * 100.0
+                # In healthy trend (0.4% to 3.8%), hovering just above/at VWAP (0.01% to 0.60%), holding above low
+                if 0.4 <= day_chg <= 3.8 and 0.01 <= dist_from_vwap <= 0.60 and ltp > low_p:
+                    return {
+                        "strategy_id": strat_id,
+                        "strategy_name": "VWAP Institutional Pullback",
+                        "symbol": symbol,
+                        "side": "BUY",
+                        "ltp": ltp,
+                        "reason": f"Institutional VWAP Pullback (LTP ₹{ltp:.2f} testing VWAP ₹{vwap:.2f} with +{dist_from_vwap:.2f}% buffer, Day +{day_chg:.1f}%)",
+                    }
+
+        # 7. ORB 15-MIN INSTITUTIONAL BREAKOUT (⚡ Opening Range Expansion Breakout)
+        elif strat_id == "orb_breakout":
+            if high_p > open_p and prev_close > 0 and ltp > prev_close:
+                rng = high_p - low_p
+                if rng > 0 and (ltp - low_p) / rng >= 0.92:  # trading in top 8% of day's range
+                    day_gain = ((ltp - open_p) / open_p) * 100.0
+                    day_chg = ((ltp - prev_close) / prev_close) * 100.0
+                    if 0.7 <= day_gain <= 4.0 and day_chg >= 0.5:
+                        return {
+                            "strategy_id": strat_id,
+                            "strategy_name": "ORB 15-Min Breakout",
+                            "symbol": symbol,
+                            "side": "BUY",
+                            "ltp": ltp,
+                            "reason": f"ORB Range Breakout (LTP near ₹{high_p:.2f} Day High, +{day_gain:.1f}% vs Open)",
+                        }
 
         return None
 
