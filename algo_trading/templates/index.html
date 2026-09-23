@@ -1424,7 +1424,8 @@
                                     <span class="rms-hint">Stock list scanned for signals</span>
                                 </label>
                                 <select id="algo-universe-select" class="rms-styled-select" onchange="updateAlgoRMS()">
-                                    <option value="nifty50" selected>🔵 Nifty 50 (Bluechips)</option>
+                                    <option value="nifty50">🔵 Nifty 50 (Bluechips)</option>
+                                    <option value="all_stocks" selected>🌐 All Stocks (₹50–₹3,000 | MCap &gt; 100M)</option>
                                     <option value="fno">🎯 Nifty F&amp;O (~185 Liquid Stocks)</option>
                                     <option value="nifty100">📈 Nifty 100</option>
                                     <option value="watchlist">⭐ My Watchlist</option>
@@ -1458,6 +1459,32 @@
                                         <option value="60" selected>🔥 60% (Strict)</option>
                                         <option value="65">65% (High Conf)</option>
                                         <option value="70">70% (Elite Only)</option>
+                                    </select>
+                                </div>
+                            </div>
+
+                            <div class="rms-row-2col">
+                                <div class="rms-input-group">
+                                    <label for="algo-rms-min-price">
+                                        <span class="rms-label-tag cyan">PRICE RANGE (₹)</span>
+                                        <span class="rms-hint">₹50 – ₹3,000 Filter</span>
+                                    </label>
+                                    <div style="display:flex;align-items:center;gap:6px">
+                                        <input type="number" id="algo-rms-min-price" class="rms-styled-input" value="50" step="5" min="1" placeholder="50" style="width:48%;text-align:center" title="Min Stock Price (₹50)">
+                                        <span style="color:#64748b;font-size:12px;font-weight:700">–</span>
+                                        <input type="number" id="algo-rms-max-price" class="rms-styled-input" value="3000" step="100" min="100" placeholder="3000" style="width:48%;text-align:center" title="Max Stock Price (₹3,000)">
+                                    </div>
+                                </div>
+
+                                <div class="rms-input-group">
+                                    <label for="algo-rms-min-mcap">
+                                        <span class="rms-label-tag green">MIN MARKET CAP</span>
+                                        <span class="rms-hint">&gt; 100M Required</span>
+                                    </label>
+                                    <select id="algo-rms-min-mcap" class="rms-styled-select">
+                                        <option value="100" selected>&gt; 100M (₹10 Cr+)</option>
+                                        <option value="500">&gt; 500M (₹50 Cr+)</option>
+                                        <option value="1000">&gt; 1,000M (₹100 Cr+)</option>
                                     </select>
                                 </div>
                             </div>
@@ -1832,6 +1859,6 @@
 <script src="/static/js/trade.js?v=2"></script>
 <script src="/static/js/paper.js?v=2"></script>
 <script src="/static/js/reversals.js?v=2"></script>
-<script src="/static/js/algotrade.js?v=6"></script>
+<script src="/static/js/algotrade.js?v=7"></script>
 </body>
 </html>

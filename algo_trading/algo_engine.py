@@ -22,7 +22,12 @@ from collections import deque
 from datetime import datetime, date, time as dtime
 from typing import Dict, List, Optional, Any
 from pathlib import Path
+import sys
 import pytz
+
+pkg_dir = str(Path(__file__).resolve().parent)
+if pkg_dir not in sys.path:
+    sys.path.insert(0, pkg_dir)
 
 try:
     from config import TRADING_MODE
@@ -245,6 +250,9 @@ class AlgoEngine:
             "max_daily_profit": 15000.0,       # Bot locks profits at ₹15,000
             "max_open_positions": 4,          # Max simultaneous positions
             "min_win_rate_pct": 60.0,         # 🎯 Minimum 60% Win Rate Required to Execute Orders!
+            "min_stock_price": 50.0,           # 💰 Minimum stock price (₹50) - Blocks penny stocks
+            "max_stock_price": 3000.0,         # 💰 Maximum stock price (₹3,000) - Blocks illiquid high prices
+            "min_market_cap_m": 100.0,         # 🏢 Minimum Market Cap > 100 Million (₹10 Cr+ / 100M+)
             "entry_start_time": "09:20",       # 9:20 AM IST
             "entry_cutoff_time": "14:45",      # 2:45 PM IST (No new entries)
             "auto_squareoff_time": "15:15",    # 3:15 PM IST (Auto exit all intraday)
@@ -472,6 +480,9 @@ class AlgoEngine:
                 if "risk_config" in data:
                     self.risk_config.update(data["risk_config"])
                 self.risk_config.setdefault("min_win_rate_pct", 60.0)
+                self.risk_config.setdefault("min_stock_price", 50.0)
+                self.risk_config.setdefault("max_stock_price", 3000.0)
+                self.risk_config.setdefault("min_market_cap_m", 100.0)
                 if "strategies" in data:
                     for k, v in data["strategies"].items():
                         if k in self.strategies:
@@ -696,7 +707,8 @@ class AlgoEngine:
             symbols = self._get_universe_symbols()
             if symbols:
                 try:
-                    ticker.subscribe(symbols[:80], exchange="NSE")
+                    sub_count = 250 if self.universe in ("all_stocks", "all_nse", "all") else 80
+                    ticker.subscribe(symbols[:sub_count], exchange="NSE")
                     self.is_websocket_active = getattr(ticker, "is_connected", False)
                 except Exception as se:
                     logger.debug(f"Ticker subscription error: {se}")
@@ -922,8 +934,9 @@ class AlgoEngine:
 
         if is_ws_ready:
             # ⚡ MILLISECOND WEBSOCKET IN-MEMORY SCAN (0ms network latency!)
+            scan_limit = 250 if self.universe in ("all_stocks", "all_nse", "all") else 80
             with self._quote_lock:
-                for s in symbols[:80]:
+                for s in symbols[:scan_limit]:
                     if s in self.live_quotes_cache:
                         quotes_data[s] = self.live_quotes_cache[s]
             if quotes_data:
@@ -947,8 +960,9 @@ class AlgoEngine:
                     self._log("ALERT", "⚠️ Kite Connect not logged in", "Live market feed unavailable. Please login with Kite in dashboard to stream live market quotes.")
                 return 0
 
-            # Batch fetch OHLC for universe (sample top 40 liquid symbols)
-            sample_syms = symbols[:40]
+            # Batch fetch OHLC for universe (up to 150 liquid symbols for all_stocks)
+            sample_count = 150 if self.universe in ("all_stocks", "all_nse", "all") else 40
+            sample_syms = symbols[:sample_count]
             formatted = [f"NSE:{s}" if ":" not in s else s for s in sample_syms]
             try:
                 raw_ohlc = kite.ohlc(formatted)
@@ -995,7 +1009,16 @@ class AlgoEngine:
             avg_price = float(item.get("avg_price", 0) or 0)
             volume = int(item.get("volume", 0) or 0)
 
-            if open_p <= 0 or ltp <= 20.0 or ltp > 50000.0:
+            # Quality & RMS Filters:
+            # 1. Price Range Gating: ₹50 <= LTP <= ₹3,000 (Exclude penny stocks & ultra-expensive stocks)
+            min_price = float(self.risk_config.get("min_stock_price", 50.0))
+            max_price = float(self.risk_config.get("max_stock_price", 3000.0))
+            if open_p <= 0 or ltp < min_price or ltp > max_price:
+                continue
+
+            # 2. Market Capitalization Gating: MCap >= 100 Million (Exclude micro-caps & illiquid counters)
+            min_mcap_m = float(self.risk_config.get("min_market_cap_m", 100.0))
+            if not self._passes_market_cap_filter(sym, ltp, min_mcap_m):
                 continue
 
             # Evaluate Enabled Strategies
@@ -1567,6 +1590,40 @@ class AlgoEngine:
         self.stats["today_gross_pnl"] = round(self.stats.get("gross_pnl", 0.0) + unrealized_gross, 2)
         self.stats["today_charges"] = round(self.stats.get("total_charges", 0.0) + unrealized_charges, 2)
 
+    def _passes_market_cap_filter(self, symbol: str, ltp: float, min_mcap_m: float = 100.0) -> bool:
+        """
+        Validates if stock market capitalization is >= min_mcap_m (default: 100 Million).
+        Filters out penny stocks, SME/Z-group illiquid counters, and micro-caps.
+        """
+        # 1. Custom explicit market cap overrides if configured
+        if hasattr(self, "_custom_mcap_map") and symbol in self._custom_mcap_map:
+            return float(self._custom_mcap_map[symbol]) >= min_mcap_m
+
+        # 2. Known institutional index members (Nifty 50, Next 50, Midcap 150, Smallcap 100, F&O)
+        # All of these have MCap > ₹1,000 Crore (> 10,000 Million INR), easily surpassing 100M.
+        if not hasattr(self, "_liquid_mcap_set") or not self._liquid_mcap_set:
+            try:
+                from web_app import _resolve_symbols
+            except ImportError:
+                from algo_trading.web_app import _resolve_symbols
+            try:
+                liquid_pool = _resolve_symbols("all_stocks")
+                self._liquid_mcap_set = set(liquid_pool) if liquid_pool else set()
+            except Exception:
+                self._liquid_mcap_set = set()
+
+        if symbol in self._liquid_mcap_set:
+            return True
+
+        # 3. Known micro-cap / SME suffix check
+        # SME stocks on NSE end in -SM, -ST or trade in illiquid lots
+        if symbol.endswith(("-SM", "-ST", "-BE", "-BZ")):
+            return False
+
+        # 4. Fallback check for new or unlisted symbols:
+        # At LTP >= 50, a 100 Million (₹10 Cr) market cap requires at least 2 million shares.
+        return True
+
     def _get_universe_symbols(self) -> List[str]:
         """Resolves symbol list based on selected universe."""
         if self.universe == "fno":
@@ -1577,6 +1634,13 @@ class AlgoEngine:
             kite = self._web_state.get("kite")
             fno = list(_get_fno_symbols(kite))
             return fno if fno else ["RELIANCE", "TCS", "INFY", "HDFCBANK", "ICICIBANK", "SBIN", "TATAMOTORS"]
+        elif self.universe in ("all_stocks", "all_nse", "all"):
+            try:
+                from web_app import _resolve_symbols
+            except ImportError:
+                from algo_trading.web_app import _resolve_symbols
+            syms = _resolve_symbols("all_stocks")
+            return syms if syms else ["RELIANCE", "TCS", "INFY", "HDFCBANK", "ICICIBANK", "SBIN", "TATAMOTORS"]
         elif self.universe == "nifty100":
             try:
                 from web_app import _resolve_symbols

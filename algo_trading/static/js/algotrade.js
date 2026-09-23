@@ -315,6 +315,9 @@ async function loadAlgoConfig() {
                 setVal('algo-rms-max-profit', rc.max_daily_profit || 15000);
                 setVal('algo-rms-max-positions', rc.max_open_positions || 4);
                 setVal('algo-rms-min-winrate', rc.min_win_rate_pct || 60);
+                setVal('algo-rms-min-price', rc.min_stock_price !== undefined ? rc.min_stock_price : 50);
+                setVal('algo-rms-max-price', rc.max_stock_price !== undefined ? rc.max_stock_price : 3000);
+                setVal('algo-rms-min-mcap', rc.min_market_cap_m !== undefined ? rc.min_market_cap_m : 100);
             }
 
             // Strategies Grid
@@ -519,6 +522,9 @@ async function saveAlgoRMS() {
     const maxProfit = parseFloat(document.getElementById('algo-rms-max-profit').value) || 15000;
     const maxPos = parseInt(document.getElementById('algo-rms-max-positions').value) || 4;
     const minWinRate = parseFloat(document.getElementById('algo-rms-min-winrate').value) || 60;
+    const minPrice = parseFloat(document.getElementById('algo-rms-min-price') ? document.getElementById('algo-rms-min-price').value : 50) || 50;
+    const maxPrice = parseFloat(document.getElementById('algo-rms-max-price') ? document.getElementById('algo-rms-max-price').value : 3000) || 3000;
+    const minMcap = parseFloat(document.getElementById('algo-rms-min-mcap') ? document.getElementById('algo-rms-min-mcap').value : 100) || 100;
 
     try {
         const res = await fetch('/api/algo/config', {
@@ -531,6 +537,9 @@ async function saveAlgoRMS() {
                     max_daily_profit: maxProfit,
                     max_open_positions: maxPos,
                     min_win_rate_pct: minWinRate,
+                    min_stock_price: minPrice,
+                    max_stock_price: maxPrice,
+                    min_market_cap_m: minMcap,
                 }
             })
         });
