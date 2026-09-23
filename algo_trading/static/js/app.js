@@ -231,25 +231,78 @@ async function fetchPositions() {
 }
 
 // ─── WATCHLIST ───────────────────────────────────────────────
+let _prevWatchlistQuotes = {};
+
 async function fetchWatchlist() {
     const list = await api('/api/watchlist');
     if (!Array.isArray(list)) return;
 
     const rows = list.length === 0
-        ? '<tr><td colspan="4" class="empty">No data</td></tr>'
+        ? '<tr><td colspan="4" class="empty">No symbols in watchlist. Add one above!</td></tr>'
         : list.map(item => {
-            const chg = item.change_pct || 0;
-            const cc  = chg >= 0 ? 'green' : 'red';
-            const inP = item.in_position ? ' <span style="color:var(--green);font-size:9px">●</span>' : '';
+            const chg = item.change_pct !== undefined ? item.change_pct : 0;
+            const cc  = chg > 0 ? 'green' : (chg < 0 ? 'red' : 'dim');
+            const sign = chg > 0 ? '+' : '';
+            const inP = item.in_position ? ' <span style="color:var(--green);font-size:9px" title="In Active Position">●</span>' : '';
+
+            // Flash effect on price update
+            const oldLtp = _prevWatchlistQuotes[item.symbol];
+            let flashStyle = '';
+            if (oldLtp !== undefined && item.ltp > 0) {
+                if (item.ltp > oldLtp) {
+                    flashStyle = 'style="color:#34d399;font-weight:700"';
+                } else if (item.ltp < oldLtp) {
+                    flashStyle = 'style="color:#f87171;font-weight:700"';
+                }
+            }
+            if (item.ltp > 0) {
+                _prevWatchlistQuotes[item.symbol] = item.ltp;
+            }
+
             return `<tr>
                 <td><b>${item.symbol}</b>${inP}</td>
-                <td>${item.ltp > 0 ? '₹' + item.ltp.toFixed(2) : '--'}</td>
-                <td class="${cc}">${item.ltp > 0 ? (chg >= 0 ? '+' : '') + chg.toFixed(2) + '%' : '--'}</td>
-                <td class="dim" style="font-size:10px">${item.volume > 0 ? fmtVol(item.volume) : ''}</td>
+                <td ${flashStyle}>${item.ltp > 0 ? '₹' + item.ltp.toFixed(2) : '--'}</td>
+                <td class="${cc}" style="font-weight:600">${item.ltp > 0 ? sign + chg.toFixed(2) + '%' : '--'}</td>
+                <td style="text-align:right">
+                    <button class="wl-del-btn" onclick="removeFromWatchlist('${item.symbol}')" title="Remove ${item.symbol}">×</button>
+                </td>
             </tr>`;
         }).join('');
 
     setHTML('d-watchlist', rows);
+}
+
+async function addToWatchlist(symbol) {
+    let sym = symbol;
+    if (!sym) {
+        const input = document.getElementById('wl-add-input');
+        if (input) {
+            sym = input.value.trim().toUpperCase();
+            input.value = '';
+        }
+    }
+    if (!sym) {
+        showToast('Please enter a stock symbol (e.g. TATACHEM)', 'error');
+        return;
+    }
+    const res = await api('/api/watchlist/add', 'POST', { symbol: sym });
+    if (res && res.success) {
+        showToast(`✅ Added ${sym} to Watchlist`, 'success');
+        fetchWatchlist();
+    } else {
+        showToast(res ? res.error : 'Failed to add symbol', 'error');
+    }
+}
+
+async function removeFromWatchlist(sym) {
+    if (!sym) return;
+    const res = await api('/api/watchlist/delete', 'POST', { symbol: sym });
+    if (res && res.success) {
+        showToast(`🗑️ Removed ${sym} from Watchlist`, 'info');
+        fetchWatchlist();
+    } else {
+        showToast(res ? res.error : 'Failed to remove symbol', 'error');
+    }
 }
 
 // ─── TRADES ──────────────────────────────────────────────────

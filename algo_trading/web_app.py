@@ -76,6 +76,32 @@ except Exception as _algo_err:
 
 BASE_DIR = Path(__file__).resolve().parent
 TOKEN_FILE = BASE_DIR / "data" / "access_token.json"
+WATCHLIST_FILE = BASE_DIR / "data" / "watchlist.json"
+
+def _get_watchlist_symbols() -> list:
+    """Loads persistent watchlist symbols or falls back to INTRADAY_CONFIG."""
+    try:
+        if WATCHLIST_FILE.exists():
+            with open(WATCHLIST_FILE, "r", encoding="utf-8") as f:
+                syms = json.load(f)
+                if isinstance(syms, list) and syms:
+                    return [s.upper().strip() for s in syms if s.strip()]
+    except Exception as e:
+        logger.debug(f"Failed to load watchlist.json: {e}")
+    return list(INTRADAY_CONFIG.get("watchlist", [
+        "RELIANCE", "TCS", "INFY", "HDFCBANK", "ICICIBANK", "SBIN",
+        "BAJFINANCE", "TATAMOTORS", "WIPRO", "AXISBANK"
+    ]))
+
+def _save_watchlist_symbols(symbols: list):
+    """Saves persistent watchlist symbols to watchlist.json."""
+    try:
+        WATCHLIST_FILE.parent.mkdir(parents=True, exist_ok=True)
+        with open(WATCHLIST_FILE, "w", encoding="utf-8") as f:
+            json.dump(symbols, f, indent=2)
+    except Exception as e:
+        logger.error(f"Failed to save watchlist.json: {e}")
+
 
 
 
@@ -511,6 +537,22 @@ def api_positions():
                 "pnl":       round(pnl, 2),
                 "pnl_pct":   round(pnl / max(pos["entry_price"] * pos.get("quantity", 1), 1) * 100, 2),
             })
+    algo = _state.get("algo_engine")
+    if algo:
+        for pos in algo.get_active_positions():
+            positions.append({
+                "symbol":    pos["symbol"],
+                "strategy":  pos.get("strategy_name", "ALGO"),
+                "direction": pos.get("side", "BUY"),
+                "qty":       pos.get("quantity", 1),
+                "entry":     round(pos.get("entry_price", 0), 2),
+                "ltp":       round(pos.get("current_price", pos.get("entry_price", 0)), 2),
+                "sl":        round(pos.get("stop_loss", 0), 2),
+                "target":    round(pos.get("target", 0), 2),
+                "pnl":       round(pos.get("pnl", 0), 2),
+                "pnl_pct":   round(pos.get("pnl_pct", 0), 2),
+            })
+
     return jsonify(positions)
 
 
@@ -522,35 +564,106 @@ def api_trades():
 
 @app.route("/api/watchlist")
 def api_watchlist():
+    symbols = _get_watchlist_symbols()
     result  = []
     ltp_map = {}
 
-    if _state["ticker"]:
-        for sym, tick in _state["ticker"].get_all_ticks().items():
-            ltp_map[sym] = {
-                "ltp": tick.get("ltp", 0),
-                "change_pct": tick.get("change_pct", 0),
-                "volume": tick.get("volume", 0),
-            }
-    elif _state["data"]:
+    # 1. First priority: Check algo_engine live quotes cache (ultra-fast in-memory)
+    algo = _state.get("algo_engine")
+    if algo and getattr(algo, "live_quotes_cache", None):
+        with algo._quote_lock:
+            for s in symbols:
+                if s in algo.live_quotes_cache:
+                    q = algo.live_quotes_cache[s]
+                    ltp = float(q.get("ltp") or 0)
+                    close_p = float(q.get("close") or q.get("prev_close") or 0)
+                    chg_pct = float(q.get("change_pct") or 0)
+                    if chg_pct == 0 and close_p > 0 and ltp > 0:
+                        chg_pct = round(((ltp - close_p) / close_p) * 100, 2)
+                    ltp_map[s] = {
+                        "ltp": ltp,
+                        "change_pct": chg_pct,
+                        "change": round(ltp - close_p, 2) if close_p > 0 else 0,
+                        "volume": int(q.get("volume") or 0),
+                    }
+
+    # 2. Second priority: Live Ticker WebSocket ticks
+    ticker = _state.get("ticker")
+    if ticker:
+        for s in symbols:
+            if s not in ltp_map or ltp_map[s]["ltp"] <= 0:
+                t = ticker.get_tick(s)
+                if t:
+                    ltp = float(t.get("ltp") or 0)
+                    chg_pct = float(t.get("change_pct") or 0)
+                    close_p = float(t.get("close") or 0)
+                    if chg_pct == 0 and close_p > 0 and ltp > 0:
+                        chg_pct = round(((ltp - close_p) / close_p) * 100, 2)
+                    ltp_map[s] = {
+                        "ltp": ltp,
+                        "change_pct": chg_pct,
+                        "change": round(ltp - close_p, 2) if close_p > 0 else 0,
+                        "volume": int(t.get("volume") or 0),
+                    }
+
+    # 3. Third priority: Kite OHLC batch fetch (fetches exact last_price & close)
+    missing = [s for s in symbols if s not in ltp_map or ltp_map[s]["ltp"] <= 0 or ltp_map[s]["change_pct"] == 0]
+    kite = _state.get("kite")
+    if missing and kite:
         try:
-            syms = INTRADAY_CONFIG["watchlist"][:15]
-            for sym, ltp in _state["data"].get_ltp(syms).items():
-                ltp_map[sym] = {"ltp": ltp, "change_pct": 0, "volume": 0}
+            formatted = [f"NSE:{s}" if ":" not in s else s for s in missing]
+            ohlc_data = kite.ohlc(formatted)
+            for s in missing:
+                raw = ohlc_data.get(f"NSE:{s}", {})
+                if raw:
+                    last_price = float(raw.get("last_price") or 0)
+                    close_p = float(raw.get("ohlc", {}).get("close") or 0)
+                    chg_pct = round(((last_price - close_p) / close_p) * 100, 2) if close_p > 0 and last_price > 0 else 0.0
+                    ltp_map[s] = {
+                        "ltp": last_price,
+                        "change_pct": chg_pct,
+                        "change": round(last_price - close_p, 2) if close_p > 0 else 0,
+                        "volume": int(raw.get("volume") or 0),
+                    }
+        except Exception as oe:
+            logger.debug(f"Watchlist OHLC batch error: {oe}")
+
+    # 4. Fourth priority: Fallback to get_ltp if OHLC failed
+    missing_still = [s for s in symbols if s not in ltp_map or ltp_map[s]["ltp"] <= 0]
+    if missing_still and _state.get("data"):
+        try:
+            for s, ltp in _state["data"].get_ltp(missing_still).items():
+                if s not in ltp_map or ltp_map[s]["ltp"] <= 0:
+                    ltp_map[s] = {"ltp": float(ltp or 0), "change_pct": 0.0, "change": 0.0, "volume": 0}
+        except Exception:
+            pass
+
+    # Ensure watchlist symbols are subscribed to WebSocket ticker if ticker is running
+    if ticker and getattr(ticker, "is_connected", False):
+        try:
+            unsub = [s for s in symbols if s not in ticker.subscribed_symbols]
+            if unsub:
+                ticker.subscribe(unsub, exchange="NSE")
         except Exception:
             pass
 
     in_pos = set()
-    if _state["intraday_strat"]:
+    if _state.get("algo_engine"):
+        in_pos = {p["symbol"] for p in _state["algo_engine"].get_active_positions()}
+    elif _state.get("intraday_strat"):
         in_pos = set(_state["intraday_strat"].get_active_positions().keys())
 
-    for sym in INTRADAY_CONFIG["watchlist"][:15]:
+    for sym in symbols:
         d = ltp_map.get(sym, {})
+        ltp = float(d.get("ltp") or 0)
+        chg = float(d.get("change_pct") or 0)
+        vol = int(d.get("volume") or 0)
         result.append({
             "symbol":      sym,
-            "ltp":         d.get("ltp", 0),
-            "change_pct":  round(d.get("change_pct", 0), 2),
-            "volume":      d.get("volume", 0),
+            "ltp":         round(ltp, 2),
+            "change_pct":  round(chg, 2),
+            "change":      round(d.get("change", 0), 2),
+            "volume":      vol,
             "in_position": sym in in_pos,
         })
     return jsonify(result)
@@ -1356,20 +1469,51 @@ def api_market_reversals():
 
 @app.route("/api/watchlist/add", methods=["POST"])
 def api_watchlist_add():
-    """Symbol ko intraday watchlist mein add karo"""
+    """Symbol ko persistent watchlist mein add karo"""
     body   = request.get_json(silent=True) or {}
     symbol = body.get("symbol", "").upper().strip()
 
     if not symbol:
         return jsonify({"success": False, "error": "Symbol required"})
 
-    watchlist = INTRADAY_CONFIG["watchlist"]
-    if symbol in watchlist:
+    symbols = _get_watchlist_symbols()
+    if symbol in symbols:
         return jsonify({"success": False, "error": f"{symbol} already in watchlist"})
 
-    INTRADAY_CONFIG["watchlist"].append(symbol)
-    logger.info(f"Added to watchlist: {symbol}")
-    return jsonify({"success": True, "symbol": symbol})
+    symbols.append(symbol)
+    _save_watchlist_symbols(symbols)
+    INTRADAY_CONFIG["watchlist"] = symbols
+
+    # Auto subscribe to ticker if connected
+    ticker = _state.get("ticker")
+    if ticker and getattr(ticker, "is_connected", False):
+        try:
+            ticker.subscribe([symbol], exchange="NSE")
+        except Exception:
+            pass
+
+    logger.info(f"Added to persistent watchlist: {symbol}")
+    return jsonify({"success": True, "symbol": symbol, "watchlist": symbols})
+
+
+@app.route("/api/watchlist/delete", methods=["POST"])
+def api_watchlist_delete():
+    """Symbol ko persistent watchlist se remove karo"""
+    body   = request.get_json(silent=True) or {}
+    symbol = body.get("symbol", "").upper().strip()
+
+    if not symbol:
+        return jsonify({"success": False, "error": "Symbol required"})
+
+    symbols = _get_watchlist_symbols()
+    if symbol not in symbols:
+        return jsonify({"success": False, "error": f"{symbol} not in watchlist"})
+
+    symbols = [s for s in symbols if s != symbol]
+    _save_watchlist_symbols(symbols)
+    INTRADAY_CONFIG["watchlist"] = symbols
+    logger.info(f"Removed from persistent watchlist: {symbol}")
+    return jsonify({"success": True, "symbol": symbol, "watchlist": symbols})
 
 
 # ─────────────────────────────────────────────────────────────

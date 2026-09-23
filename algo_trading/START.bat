@@ -53,5 +53,6 @@ echo   Band karne ke liye: STOP.bat chalao
 echo  =============================================
 echo.
 
-:: Server is yahan chalta rahega
-python web_app.py
+:: Server chal raha hai - window ko open rakhein
+echo Server is running... Press Ctrl+C or run STOP.bat to stop.
+pause > nul
