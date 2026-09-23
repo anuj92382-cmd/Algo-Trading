@@ -232,7 +232,17 @@ class LiveTicker:
         logger.info("🚀 Starting LiveTicker...")
 
         # Reconnect settings
-        self.ticker.enable_reconnect(reconnect_max_tries=10, reconnect_max_delay=60)
+        if hasattr(self.ticker, "enable_reconnect"):
+            try:
+                self.ticker.enable_reconnect(reconnect_max_tries=10, reconnect_max_delay=60)
+            except Exception:
+                pass
+        else:
+            try:
+                self.ticker.RECONNECT_MAX_TRIES = 10
+                self.ticker.RECONNECT_MAX_DELAY = 60
+            except Exception:
+                pass
 
         # Connect karo
         self.ticker.connect(threaded=threaded)
