@@ -246,6 +246,8 @@ class AlgoEngine:
 
         # Risk Management Settings (RMS)
         self.risk_config = {
+            "total_capital": 20000.0,          # 💼 Total Trading Capital (Max Portfolio Budget)
+            "capital_mode": "auto_split",      # "auto_split" (total_capital / max_positions) or "fixed"
             "max_daily_loss": 5000.0,         # Bot halts if loss exceeds ₹5,000
             "max_daily_profit": 15000.0,       # Bot locks profits at ₹15,000
             "max_open_positions": 4,          # Max simultaneous positions
@@ -275,7 +277,7 @@ class AlgoEngine:
                 "target_2_pct": 2.0,           # Target 2: Final 50% Runner
                 "sl_pct": 0.8,
                 "trailing_sl_pct": 0.3,
-                "capital_per_trade": 20000.0,
+                "capital_per_trade": 5000.0,
                 "product": "MIS",              # MIS uses 5X leverage
                 "side": "BOTH",               # BOTH, BUY_ONLY, SELL_ONLY
                 "signals_count": 0,
@@ -293,7 +295,7 @@ class AlgoEngine:
                 "target_2_pct": 1.6,
                 "sl_pct": 0.7,
                 "trailing_sl_pct": 0.25,
-                "capital_per_trade": 20000.0,
+                "capital_per_trade": 5000.0,
                 "product": "MIS",
                 "side": "BOTH",
                 "signals_count": 0,
@@ -311,7 +313,7 @@ class AlgoEngine:
                 "target_2_pct": 1.4,
                 "sl_pct": 0.6,
                 "trailing_sl_pct": 0.2,
-                "capital_per_trade": 20000.0,
+                "capital_per_trade": 5000.0,
                 "product": "MIS",
                 "side": "BOTH",
                 "signals_count": 0,
@@ -329,7 +331,7 @@ class AlgoEngine:
                 "target_2_pct": 2.4,
                 "sl_pct": 0.9,
                 "trailing_sl_pct": 0.35,
-                "capital_per_trade": 20000.0,
+                "capital_per_trade": 5000.0,
                 "product": "MIS",
                 "side": "BUY_ONLY",
                 "signals_count": 0,
@@ -347,7 +349,7 @@ class AlgoEngine:
                 "target_2_pct": 2.5,
                 "sl_pct": 1.0,
                 "trailing_sl_pct": 0.5,
-                "capital_per_trade": 20000.0,
+                "capital_per_trade": 5000.0,
                 "product": "MIS",
                 "side": "BOTH",
                 "signals_count": 0,
@@ -365,7 +367,7 @@ class AlgoEngine:
                 "target_2_pct": 2.0,           # Target 2: Final 50% Runner
                 "sl_pct": 0.5,                 # Tight 0.5% SL below VWAP shelf
                 "trailing_sl_pct": 0.25,
-                "capital_per_trade": 20000.0,
+                "capital_per_trade": 5000.0,
                 "product": "MIS",              # MIS uses 5X leverage
                 "side": "BUY_ONLY",
                 "signals_count": 0,
@@ -383,7 +385,7 @@ class AlgoEngine:
                 "target_2_pct": 2.2,
                 "sl_pct": 0.7,
                 "trailing_sl_pct": 0.3,
-                "capital_per_trade": 20000.0,
+                "capital_per_trade": 5000.0,
                 "product": "MIS",
                 "side": "BUY_ONLY",
                 "signals_count": 0,
@@ -483,6 +485,8 @@ class AlgoEngine:
                 self.risk_config.setdefault("min_stock_price", 50.0)
                 self.risk_config.setdefault("max_stock_price", 3000.0)
                 self.risk_config.setdefault("min_market_cap_m", 100.0)
+                self.risk_config.setdefault("total_capital", 20000.0)
+                self.risk_config.setdefault("capital_mode", "auto_split")
                 if "strategies" in data:
                     for k, v in data["strategies"].items():
                         if k in self.strategies:
@@ -995,6 +999,11 @@ class AlgoEngine:
         evaluated_count = len(quotes_data)
         active_symbols = {p["symbol"] for p in self.active_positions.values()}
 
+        total_cap = float(self.risk_config.get("total_capital", 20000.0))
+        used_margin = sum(float(p.get("margin_used", 0.0) or 0.0) for p in self.active_positions.values())
+        if used_margin >= total_cap:
+            return 0
+
         for sym, item in quotes_data.items():
             if len(self.active_positions) >= max_open:
                 break
@@ -1220,17 +1229,60 @@ class AlgoEngine:
         strat_name = strat["name"]
         product = strat.get("product", "MIS").upper()
 
-        # Calculate position sizing with 5X leverage in MIS
-        cap_alloc = float(strat.get("capital_per_trade", 20000.0))
+        # Calculate position sizing with Total Capital Protection & Auto-Split
+        total_cap = float(self.risk_config.get("total_capital", 20000.0))
+        max_pos = max(1, int(self.risk_config.get("max_open_positions", 4)))
+        cap_mode = self.risk_config.get("capital_mode", "auto_split")
+
+        # 0. Check Max Concurrent Positions
+        if len(self.active_positions) >= max_pos:
+            self._log("RMS", f"⛔ [MAX POSITIONS REACHED] Order Blocked for {symbol}",
+                      f"Active positions ({len(self.active_positions)}/{max_pos}) already at max limit. Order rejected!")
+            return
+
+        # 1. Base capital allocation per trade:
+        # In auto_split mode, total trading capital is partitioned equally across max positions (e.g. ₹20,000 / 4 = ₹5,000 per trade)
+        if cap_mode == "auto_split":
+            cap_alloc = round(total_cap / max_pos, 2)
+        else:
+            cap_alloc = float(strat.get("capital_per_trade", 5000.0))
+
+        # 2. Strict Account Capital & Margin Protection:
+        used_margin = sum(float(p.get("margin_used", 0.0) or 0.0) for p in self.active_positions.values())
+        available_cap = max(0.0, total_cap - used_margin)
+
         is_mis = (product == "MIS")
         leverage_mult = 5.0 if is_mis else 1.0
-        effective_buying_power = cap_alloc * leverage_mult
+        min_single_share_margin = round(ltp / leverage_mult, 2)
+
+        # Check if enough capital is available for at least 1 share
+        if available_cap < min_single_share_margin:
+            self._log(
+                "RMS",
+                f"⛔ [RMS CAPITAL LIMIT REACHED] Order Blocked for {symbol}",
+                f"Used Margin: ₹{used_margin:,.2f} of Total Capital: ₹{total_cap:,.2f} | "
+                f"Remaining Available: ₹{available_cap:,.2f} (Need min ₹{min_single_share_margin:,.2f} for 1 share). Order rejected!"
+            )
+            return
+
+        # Cap alloc cannot exceed remaining available capital
+        effective_cap = min(cap_alloc, available_cap)
+        effective_buying_power = effective_cap * leverage_mult
 
         quantity = int(effective_buying_power / ltp)
         if quantity < 1:
-            quantity = 1
+            if min_single_share_margin <= available_cap:
+                quantity = 1
+            else:
+                self._log("RMS", f"⛔ [INSUFFICIENT FUNDS] Cannot buy 1 Qty {symbol}: Required ₹{min_single_share_margin:,.2f} > Available ₹{available_cap:,.2f}")
+                return
 
         margin_req = (ltp * quantity) / leverage_mult
+
+        # Scale down quantity if margin exceeds available capital
+        while quantity > 1 and (margin_req > available_cap + 1.0):
+            quantity -= 1
+            margin_req = (ltp * quantity) / leverage_mult
 
         # Target & SL Calculations (Multi-Target: T1 for 50% partial exit & T2 for runner)
         t1_pct = float(strat.get("target_1_pct", strat.get("target_pct", 1.0)))
@@ -1273,7 +1325,7 @@ class AlgoEngine:
                 except Exception as pe:
                     logger.warning(f"Paper portfolio order add warning: {pe}")
 
-            lev_info = f"(5X Margin: ₹{margin_req:,.2f})" if is_mis else "(1X CNC)"
+            lev_info = f"(5X Margin: ₹{margin_req:,.2f} | Fund Used: ₹{margin_req+used_margin:,.0f}/₹{total_cap:,.0f})" if is_mis else f"(1X CNC: ₹{margin_req:,.2f} | Fund Used: ₹{margin_req+used_margin:,.0f}/₹{total_cap:,.0f})"
             self._log("ORDER", f"⚡ [AUTO {side}] EXECUTED: {quantity} Qty {symbol} @ ₹{ltp:.2f} {lev_info}",
                       f"T1: ₹{t1_price:.2f} (+{t1_pct}%, 50% Qty) | T2: ₹{t2_price:.2f} (+{t2_pct}%) | SL: ₹{sl_price:.2f} (-{sl_pct}%)")
 

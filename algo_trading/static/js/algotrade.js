@@ -311,6 +311,7 @@ async function loadAlgoConfig() {
             // RMS Fields
             if (data.risk_config) {
                 const rc = data.risk_config;
+                setVal('algo-rms-total-capital', rc.total_capital || 20000);
                 setVal('algo-rms-max-loss', rc.max_daily_loss || 5000);
                 setVal('algo-rms-max-profit', rc.max_daily_profit || 15000);
                 setVal('algo-rms-max-positions', rc.max_open_positions || 4);
@@ -318,6 +319,7 @@ async function loadAlgoConfig() {
                 setVal('algo-rms-min-price', rc.min_stock_price !== undefined ? rc.min_stock_price : 50);
                 setVal('algo-rms-max-price', rc.max_stock_price !== undefined ? rc.max_stock_price : 3000);
                 setVal('algo-rms-min-mcap', rc.min_market_cap_m !== undefined ? rc.min_market_cap_m : 100);
+                updateCapitalSplitHint();
             }
 
             // Strategies Grid
@@ -518,6 +520,7 @@ async function saveAlgoStratModal() {
 // ─── 6. RMS RISK CONTROLS SAVING ──────────────────────────────
 async function saveAlgoRMS() {
     const universe = document.getElementById('algo-universe-select').value;
+    const totalCap = parseFloat(document.getElementById('algo-rms-total-capital') ? document.getElementById('algo-rms-total-capital').value : 20000) || 20000;
     const maxLoss = parseFloat(document.getElementById('algo-rms-max-loss').value) || 5000;
     const maxProfit = parseFloat(document.getElementById('algo-rms-max-profit').value) || 15000;
     const maxPos = parseInt(document.getElementById('algo-rms-max-positions').value) || 4;
@@ -533,6 +536,8 @@ async function saveAlgoRMS() {
             body: JSON.stringify({
                 universe: universe,
                 risk_config: {
+                    total_capital: totalCap,
+                    capital_mode: 'auto_split',
                     max_daily_loss: maxLoss,
                     max_daily_profit: maxProfit,
                     max_open_positions: maxPos,
@@ -555,7 +560,21 @@ async function saveAlgoRMS() {
     }
 }
 
+function updateCapitalSplitHint() {
+    const capInput = document.getElementById('algo-rms-total-capital');
+    const posInput = document.getElementById('algo-rms-max-positions');
+    const hintEl = document.getElementById('algo-rms-cap-split-hint');
+    if (!hintEl) return;
+
+    const total = parseFloat(capInput ? capInput.value : 20000) || 20000;
+    const maxPos = parseInt(posInput ? posInput.value : 4) || 4;
+    const perStock = Math.round(total / maxPos);
+
+    hintEl.textContent = `₹${perStock.toLocaleString('en-IN')} / stock across ${maxPos} pos`;
+}
+
 function updateAlgoRMS() {
+    updateCapitalSplitHint();
     saveAlgoRMS();
 }
 
