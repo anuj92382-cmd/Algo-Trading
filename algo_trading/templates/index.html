@@ -1386,6 +1386,17 @@
                     </div>
 
                     <div class="algo-rms-field">
+                        <label>Min Setup Win Rate %</label>
+                        <select id="algo-rms-min-winrate" class="ctrl-select">
+                            <option value="50">50% Minimum</option>
+                            <option value="55">55% Minimum</option>
+                            <option value="60" selected>🔥 60% Minimum (Strict Quality)</option>
+                            <option value="65">65% Minimum (High Confidence)</option>
+                            <option value="70">70% Minimum (Elite Only)</option>
+                        </select>
+                    </div>
+
+                    <div class="algo-rms-field">
                         <label>Timing Rules (IST)</label>
                         <div class="algo-timing-pill">
                             <span>Entries: <strong>09:20 - 14:45</strong></span>
@@ -1720,6 +1731,6 @@
 <script src="/static/js/trade.js?v=2"></script>
 <script src="/static/js/paper.js?v=2"></script>
 <script src="/static/js/reversals.js?v=2"></script>
-<script src="/static/js/algotrade.js?v=1"></script>
+<script src="/static/js/algotrade.js?v=2"></script>
 </body>
 </html>

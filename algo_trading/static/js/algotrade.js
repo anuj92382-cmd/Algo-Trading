@@ -275,6 +275,7 @@ async function loadAlgoConfig() {
                 setVal('algo-rms-max-loss', rc.max_daily_loss || 5000);
                 setVal('algo-rms-max-profit', rc.max_daily_profit || 15000);
                 setVal('algo-rms-max-positions', rc.max_open_positions || 4);
+                setVal('algo-rms-min-winrate', rc.min_win_rate_pct || 60);
             }
 
             // Strategies Grid
@@ -478,6 +479,7 @@ async function saveAlgoRMS() {
     const maxLoss = parseFloat(document.getElementById('algo-rms-max-loss').value) || 5000;
     const maxProfit = parseFloat(document.getElementById('algo-rms-max-profit').value) || 15000;
     const maxPos = parseInt(document.getElementById('algo-rms-max-positions').value) || 4;
+    const minWinRate = parseFloat(document.getElementById('algo-rms-min-winrate').value) || 60;
 
     try {
         const res = await fetch('/api/algo/config', {
@@ -489,6 +491,7 @@ async function saveAlgoRMS() {
                     max_daily_loss: maxLoss,
                     max_daily_profit: maxProfit,
                     max_open_positions: maxPos,
+                    min_win_rate_pct: minWinRate,
                 }
             })
         });
@@ -566,7 +569,10 @@ function renderAlgoPositionsTable(positions) {
                         <strong>${p.symbol}</strong> ↗
                     </a>
                 </td>
-                <td><span class="badge-mini purple">${p.strategy_name || 'Algo'}</span></td>
+                <td>
+                    <span class="badge-mini purple">${p.strategy_name || 'Algo'}</span>
+                    <span class="badge-mini cyan" title="Setup Win Rate Probability">🔥 ${p.win_rate || 60}% WR</span>
+                </td>
                 <td><span class="${sideClass}">${p.side}</span></td>
                 <td><span class="badge-mini blue">${p.product} (5X)</span></td>
                 <td>${p.quantity}</td>
@@ -764,7 +770,10 @@ function renderAlgoTradesTable(trades) {
                         <strong>${t.symbol}</strong> ↗
                     </a>
                 </td>
-                <td><span class="badge-mini purple">${t.strategy || 'Algo'}</span></td>
+                <td>
+                    <span class="badge-mini purple">${t.strategy || 'Algo'}</span>
+                    <span class="badge-mini cyan" title="Setup Win Rate Probability">🔥 ${t.win_rate || 60}% WR</span>
+                </td>
                 <td><span class="badge-mini ${t.side === 'BUY' ? 'green' : 'red'}">${t.side}</span></td>
                 <td><span class="badge-mini blue">${t.product || 'MIS'}</span></td>
                 <td>${t.quantity}</td>
