@@ -74,7 +74,9 @@ try:
 except Exception as _algo_err:
     logger.error(f"Failed to initialize AlgoEngine: {_algo_err}")
 
-TOKEN_FILE = Path("data/access_token.json")
+BASE_DIR = Path(__file__).resolve().parent
+TOKEN_FILE = BASE_DIR / "data" / "access_token.json"
+
 
 
 # ─────────────────────────────────────────────────────────────
@@ -130,6 +132,14 @@ def _init_modules(kite, user_name: str = "", user_id: str = ""):
     _state["error"]          = ""
     logger.info(f"✅ Modules initialized | User: {user_name} ({user_id})")
 
+    # Sync algo engine with kite and TRADING_MODE from .env
+    engine = _state.get("algo_engine")
+    if engine:
+        engine.set_mode(TRADING_MODE)
+        if engine.status == "STOPPED":
+            engine.start()
+            logger.info(f"🤖 Algo Auto-Pilot automatically started in {TRADING_MODE} mode")
+
 
 def _try_auto_login() -> bool:
     """Saved token se auto login try karo"""
@@ -163,6 +173,17 @@ def _try_auto_login() -> bool:
         except Exception:
             pass
         return False
+
+
+# Attempt auto-login at server startup so Algo Engine immediately attaches to live Kite market feed
+try:
+    if _try_auto_login():
+        logger.info(f"🚀 Server startup: Kite auto-login successful | Mode: {TRADING_MODE}")
+    else:
+        logger.info(f"ℹ️ Server startup: Kite not logged in yet | Mode: {TRADING_MODE}")
+except Exception as _startup_login_err:
+    logger.warning(f"Startup login attempt warning: {_startup_login_err}")
+
 
 
 # ─────────────────────────────────────────────────────────────

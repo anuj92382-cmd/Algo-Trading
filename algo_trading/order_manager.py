@@ -14,8 +14,10 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 from typing import Optional
+from pathlib import Path
 
 import pytz
+
 from kiteconnect import KiteConnect
 
 from config import (
@@ -651,8 +653,11 @@ class PaperPortfolio:
     Live P&L calculate karta hai current market price se.
     """
 
-    def __init__(self, storage_path: str = "data/paper_portfolio.json"):
-        self.storage_path = storage_path
+    def __init__(self, storage_path: Optional[str] = None):
+        if storage_path is None:
+            self.storage_path = str(Path(__file__).resolve().parent / "data" / "paper_portfolio.json")
+        else:
+            self.storage_path = storage_path
         self.positions:    dict[str, PaperPosition] = {}  # symbol -> position
         self.orders:       list[PaperOrder]         = []
         self.closed_pnl:   float                    = 0.0  # Total realized P&L
@@ -661,7 +666,7 @@ class PaperPortfolio:
     def load(self):
         """JSON file se portfolio load karo"""
         try:
-            if not os.path.exists(self.storage_path):
+            if not os.path.exists(self.storage_path) or os.path.getsize(self.storage_path) == 0:
                 # Create empty portfolio
                 self.save()
                 logger.info(f"📄 Paper portfolio initialized: {self.storage_path}")
@@ -669,6 +674,7 @@ class PaperPortfolio:
 
             with open(self.storage_path, 'r', encoding='utf-8') as f:
                 data = json.load(f)
+
 
             # Load positions
             self.positions = {}

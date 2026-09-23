@@ -24,6 +24,10 @@ from typing import Dict, List, Optional, Any
 from pathlib import Path
 import pytz
 
+try:
+    from config import TRADING_MODE
+except Exception:
+    TRADING_MODE = os.getenv("TRADING_MODE", "PAPER")
 
 logger = logging.getLogger("algo_engine")
 IST = pytz.timezone("Asia/Kolkata")
@@ -44,8 +48,9 @@ class AlgoEngine:
 
         # Engine State
         self.status = "STOPPED"       # "STOPPED" | "RUNNING" | "PAUSED"
-        self.mode = "PAPER"           # "PAPER" | "LIVE"
+        self.mode = TRADING_MODE.upper().strip() if TRADING_MODE else "PAPER"  # Controlled via .env
         self.universe = "nifty50"     # "nifty50" | "fno" | "nifty100" | "watchlist"
+
 
         # Scheduler & Timing
         self.scan_interval_sec = 15
@@ -238,8 +243,9 @@ class AlgoEngine:
             if STATE_FILE.exists():
                 with open(STATE_FILE, "r", encoding="utf-8") as f:
                     data = json.load(f)
-                self.mode = data.get("mode", "PAPER")
+                self.mode = TRADING_MODE.upper().strip() if TRADING_MODE else data.get("mode", "PAPER")
                 self.universe = data.get("universe", "nifty50")
+
                 if "risk_config" in data:
                     self.risk_config.update(data["risk_config"])
                 if "strategies" in data:
@@ -447,10 +453,18 @@ class AlgoEngine:
             return
 
         kite = self._web_state.get("kite")
+        if not kite:
+            try:
+                from web_app import _try_auto_login
+                if _try_auto_login():
+                    kite = self._web_state.get("kite")
+            except Exception:
+                pass
         symbols = list({f"NSE:{p['symbol']}" for p in self.active_positions.values()})
 
         # Fetch live quotes
         ltp_map = {}
+
         if kite:
             try:
                 quotes = kite.quote(symbols)
@@ -599,7 +613,20 @@ class AlgoEngine:
 
         kite = self._web_state.get("kite")
         if not kite:
+            try:
+                from web_app import _try_auto_login
+                if _try_auto_login():
+                    kite = self._web_state.get("kite")
+            except Exception:
+                pass
+
+        if not kite:
+            now_sec = time.time()
+            if now_sec - getattr(self, "_last_no_kite_log", 0) > 60:
+                self._last_no_kite_log = now_sec
+                self._log("ALERT", "⚠️ Kite Connect not logged in", "Live market feed unavailable. Please login with Kite in dashboard to stream live market quotes.")
             return
+
 
         # Check entry cutoff time
         now = datetime.now(IST).time()
