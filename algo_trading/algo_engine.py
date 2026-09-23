@@ -78,6 +78,8 @@ class AlgoEngine:
                 "enabled": True,
                 "timeframe": "5m",
                 "target_pct": 1.5,
+                "target_1_pct": 1.0,           # Target 1: Book 50% Qty & Move SL to Cost
+                "target_2_pct": 2.0,           # Target 2: Final 50% Runner
                 "sl_pct": 0.8,
                 "trailing_sl_pct": 0.3,
                 "capital_per_trade": 20000.0,
@@ -94,6 +96,8 @@ class AlgoEngine:
                 "enabled": True,
                 "timeframe": "3m",
                 "target_pct": 1.2,
+                "target_1_pct": 0.8,
+                "target_2_pct": 1.6,
                 "sl_pct": 0.7,
                 "trailing_sl_pct": 0.25,
                 "capital_per_trade": 20000.0,
@@ -110,6 +114,8 @@ class AlgoEngine:
                 "enabled": True,
                 "timeframe": "5m",
                 "target_pct": 1.0,
+                "target_1_pct": 0.7,
+                "target_2_pct": 1.4,
                 "sl_pct": 0.6,
                 "trailing_sl_pct": 0.2,
                 "capital_per_trade": 20000.0,
@@ -126,6 +132,8 @@ class AlgoEngine:
                 "enabled": True,
                 "timeframe": "5m",
                 "target_pct": 1.8,
+                "target_1_pct": 1.2,
+                "target_2_pct": 2.4,
                 "sl_pct": 0.9,
                 "trailing_sl_pct": 0.35,
                 "capital_per_trade": 20000.0,
@@ -142,6 +150,8 @@ class AlgoEngine:
                 "enabled": True,
                 "timeframe": "5m",
                 "target_pct": 2.0,
+                "target_1_pct": 1.2,
+                "target_2_pct": 2.5,
                 "sl_pct": 1.0,
                 "trailing_sl_pct": 0.5,
                 "capital_per_trade": 20000.0,
@@ -157,6 +167,9 @@ class AlgoEngine:
 
         # Closed Trades History
         self.closed_trades: List[dict] = []
+
+        # Intraday Equity Curve Tracker
+        self.equity_curve: List[dict] = []
 
         # Performance Metrics
         self.stats = {
@@ -473,13 +486,15 @@ class AlgoEngine:
             pos["pnl"] = round(pnl, 2)
             pos["pnl_pct"] = round(pnl_pct, 2)
 
-            # DYNAMIC TRAILING STOP LOSS
+            # DYNAMIC TRAILING STOP LOSS & MULTI-TARGET EXITS
             trail_pct = pos.get("trailing_step_pct", 0.3)
+            t1 = pos.get("target_1", pos.get("target", 0))
+            t2 = pos.get("target_2", t1 * (1.01 if side == "BUY" else 0.99))
+
             if side == "BUY":
                 # If price advanced beyond entry by trailing step, trail SL up
                 favorable_gain = ((ltp - entry_p) / entry_p) * 100.0
                 if favorable_gain >= trail_pct:
-                    # New trailing SL maintains same initial distance from highest price
                     initial_sl_dist_pct = ((entry_p - pos["stop_loss"]) / entry_p) * 100.0
                     new_sl = round(pos["highest_price"] * (1.0 - (initial_sl_dist_pct / 100.0)), 2)
                     if new_sl > pos["trailing_sl"]:
@@ -487,16 +502,38 @@ class AlgoEngine:
                         pos["trailing_sl"] = new_sl
                         self._log("TRAIL", f"📈 Trailed SL Up: {sym} (LTP: ₹{ltp:.2f})", f"SL moved from ₹{old_sl:.2f} → ₹{new_sl:.2f} (+{trail_pct}%)")
 
-                # AUTO TARGET EXIT
-                if ltp >= pos["target"]:
-                    self._log("ORDER", f"🎯 TARGET HIT! ⚡ Auto Exiting {sym} @ ₹{ltp:.2f}", f"Profit: +₹{pnl:,.2f} (+{pnl_pct:.2f}%)")
-                    self._exit_position(pos, exit_price=ltp, reason="TARGET_HIT")
+                # AUTO TARGET 1 EXIT (Book 50% & Move SL to Cost)
+                if not pos.get("target_1_hit", False) and ltp >= t1:
+                    exit_qty = max(1, pos["quantity"] // 2)
+                    self._exit_partial_position(pos, exit_qty=exit_qty, exit_price=ltp, reason="TARGET_1_HIT")
+                    pos["quantity"] -= exit_qty
+                    pos["target_1_hit"] = True
+                    # Move Stop Loss to Entry Price (100% Risk-Free!)
+                    pos["stop_loss"] = entry_p
+                    pos["trailing_sl"] = max(pos["trailing_sl"], entry_p)
+                    self._log("ORDER", f"🎯 [TARGET 1 HIT] ⚡ Booked 50% ({exit_qty} Qty) on {sym} @ ₹{ltp:.2f}",
+                              f"🛡️ SL moved to Entry Cost ₹{entry_p:.2f} (Trade is now 100% Risk-Free!)")
+                    continue
+
+                # AUTO TARGET 2 EXIT (Final 50% Runner Exit)
+                if pos.get("target_1_hit", False) and ltp >= t2:
+                    self._log("ORDER", f"🏆 [TARGET 2 HIT] ⚡ Auto Exiting remaining {pos['quantity']} Qty on {sym} @ ₹{ltp:.2f}",
+                              f"Profit: +₹{pnl:,.2f} (+{pnl_pct:.2f}%) | Full targets achieved!")
+                    self._exit_position(pos, exit_price=ltp, reason="TARGET_2_HIT")
+                    continue
+
+                # Gap up past T2 directly
+                if not pos.get("target_1_hit", False) and ltp >= t2:
+                    self._log("ORDER", f"🏆 [TARGET 2 HIT] ⚡ Auto Exiting full {pos['quantity']} Qty on {sym} @ ₹{ltp:.2f}",
+                              f"Profit: +₹{pnl:,.2f} (+{pnl_pct:.2f}%)")
+                    self._exit_position(pos, exit_price=ltp, reason="TARGET_2_HIT")
                     continue
 
                 # AUTO STOP LOSS EXIT
                 if ltp <= pos["trailing_sl"]:
-                    self._log("ORDER", f"🛑 STOP LOSS HIT! ⚡ Auto Exiting {sym} @ ₹{ltp:.2f}", f"P&L: ₹{pnl:,.2f} ({pnl_pct:.2f}%)")
-                    self._exit_position(pos, exit_price=ltp, reason="STOP_LOSS_HIT")
+                    reason = "COST_SL_HIT" if pos.get("target_1_hit", False) else "STOP_LOSS_HIT"
+                    self._log("ORDER", f"🛑 [{reason}] ⚡ Auto Exiting {sym} @ ₹{ltp:.2f}", f"P&L: ₹{pnl:,.2f} ({pnl_pct:.2f}%)")
+                    self._exit_position(pos, exit_price=ltp, reason=reason)
                     continue
 
             else:  # SHORT POSITION
@@ -509,16 +546,36 @@ class AlgoEngine:
                         pos["trailing_sl"] = new_sl
                         self._log("TRAIL", f"📉 Trailed SL Down: {sym} (LTP: ₹{ltp:.2f})", f"SL moved from ₹{old_sl:.2f} → ₹{new_sl:.2f}")
 
-                # AUTO TARGET EXIT
-                if ltp <= pos["target"]:
-                    self._log("ORDER", f"🎯 TARGET HIT! ⚡ Auto Exiting {sym} @ ₹{ltp:.2f}", f"Profit: +₹{pnl:,.2f} (+{pnl_pct:.2f}%)")
-                    self._exit_position(pos, exit_price=ltp, reason="TARGET_HIT")
+                # AUTO TARGET 1 EXIT (Short)
+                if not pos.get("target_1_hit", False) and ltp <= t1:
+                    exit_qty = max(1, pos["quantity"] // 2)
+                    self._exit_partial_position(pos, exit_qty=exit_qty, exit_price=ltp, reason="TARGET_1_HIT")
+                    pos["quantity"] -= exit_qty
+                    pos["target_1_hit"] = True
+                    pos["stop_loss"] = entry_p
+                    pos["trailing_sl"] = min(pos["trailing_sl"], entry_p)
+                    self._log("ORDER", f"🎯 [TARGET 1 HIT] ⚡ Booked 50% ({exit_qty} Qty) on {sym} @ ₹{ltp:.2f}",
+                              f"🛡️ SL moved to Entry Cost ₹{entry_p:.2f} (Trade is now 100% Risk-Free!)")
+                    continue
+
+                # AUTO TARGET 2 EXIT (Short)
+                if pos.get("target_1_hit", False) and ltp <= t2:
+                    self._log("ORDER", f"🏆 [TARGET 2 HIT] ⚡ Auto Exiting remaining {pos['quantity']} Qty on {sym} @ ₹{ltp:.2f}",
+                              f"Profit: +₹{pnl:,.2f} (+{pnl_pct:.2f}%) | Full targets achieved!")
+                    self._exit_position(pos, exit_price=ltp, reason="TARGET_2_HIT")
+                    continue
+
+                if not pos.get("target_1_hit", False) and ltp <= t2:
+                    self._log("ORDER", f"🏆 [TARGET 2 HIT] ⚡ Auto Exiting full {pos['quantity']} Qty on {sym} @ ₹{ltp:.2f}",
+                              f"Profit: +₹{pnl:,.2f} (+{pnl_pct:.2f}%)")
+                    self._exit_position(pos, exit_price=ltp, reason="TARGET_2_HIT")
                     continue
 
                 # AUTO STOP LOSS EXIT
                 if ltp >= pos["trailing_sl"]:
-                    self._log("ORDER", f"🛑 STOP LOSS HIT! ⚡ Auto Exiting {sym} @ ₹{ltp:.2f}", f"P&L: ₹{pnl:,.2f} ({pnl_pct:.2f}%)")
-                    self._exit_position(pos, exit_price=ltp, reason="STOP_LOSS_HIT")
+                    reason = "COST_SL_HIT" if pos.get("target_1_hit", False) else "STOP_LOSS_HIT"
+                    self._log("ORDER", f"🛑 [{reason}] ⚡ Auto Exiting {sym} @ ₹{ltp:.2f}", f"P&L: ₹{pnl:,.2f} ({pnl_pct:.2f}%)")
+                    self._exit_position(pos, exit_price=ltp, reason=reason)
                     continue
 
     # ─────────────────────────────────────────────────────────────
@@ -717,16 +774,19 @@ class AlgoEngine:
 
         margin_req = (ltp * quantity) / leverage_mult
 
-        # Target & SL Calculations
-        target_pct = float(strat.get("target_pct", 1.5))
+        # Target & SL Calculations (Multi-Target: T1 for 50% partial exit & T2 for runner)
+        t1_pct = float(strat.get("target_1_pct", strat.get("target_pct", 1.0)))
+        t2_pct = float(strat.get("target_2_pct", t1_pct * 2.0))
         sl_pct = float(strat.get("sl_pct", 0.8))
         trail_pct = float(strat.get("trailing_sl_pct", 0.3))
 
         if side == "BUY":
-            target_price = round(ltp * (1.0 + (target_pct / 100.0)), 2)
+            t1_price = round(ltp * (1.0 + (t1_pct / 100.0)), 2)
+            t2_price = round(ltp * (1.0 + (t2_pct / 100.0)), 2)
             sl_price = round(ltp * (1.0 - (sl_pct / 100.0)), 2)
         else:
-            target_price = round(ltp * (1.0 - (target_pct / 100.0)), 2)
+            t1_price = round(ltp * (1.0 - (t1_pct / 100.0)), 2)
+            t2_price = round(ltp * (1.0 - (t2_pct / 100.0)), 2)
             sl_price = round(ltp * (1.0 + (sl_pct / 100.0)), 2)
 
         # Log Signal Detection
@@ -749,7 +809,7 @@ class AlgoEngine:
                         product=product,
                         price=ltp,
                         stop_loss=sl_price,
-                        target=target_price,
+                        target=t1_price,
                         tag=f"ALGO_{strat_id}",
                     )
                 except Exception as pe:
@@ -757,7 +817,7 @@ class AlgoEngine:
 
             lev_info = f"(5X Margin: ₹{margin_req:,.2f})" if is_mis else "(1X CNC)"
             self._log("ORDER", f"⚡ [AUTO {side}] EXECUTED: {quantity} Qty {symbol} @ ₹{ltp:.2f} {lev_info}",
-                      f"Target: ₹{target_price:.2f} (+{target_pct}%) | SL: ₹{sl_price:.2f} (-{sl_pct}%)")
+                      f"T1: ₹{t1_price:.2f} (+{t1_pct}%, 50% Qty) | T2: ₹{t2_price:.2f} (+{t2_pct}%) | SL: ₹{sl_price:.2f} (-{sl_pct}%)")
 
         else:
             # Route to Live KiteConnect API
@@ -778,7 +838,7 @@ class AlgoEngine:
                     )
                     order_id = str(live_order_id)
                     self._log("ORDER", f"🔴 [LIVE AUTO {side}] FIRED TO ZERODHA: {quantity} Qty {symbol} @ ₹{ltp:.2f}",
-                              f"Order ID: {order_id} | Target: ₹{target_price:.2f} | SL: ₹{sl_price:.2f}")
+                              f"Order ID: {order_id} | T1: ₹{t1_price:.2f} | T2: ₹{t2_price:.2f} | SL: ₹{sl_price:.2f}")
                 except Exception as ke:
                     self._log("ERROR", f"Failed to place Live Kite order for {symbol}: {ke}")
                     return
@@ -797,12 +857,16 @@ class AlgoEngine:
             "side": side,
             "product": product,
             "quantity": quantity,
+            "original_quantity": quantity,
             "entry_price": ltp,
             "current_price": ltp,
             "highest_price": ltp,
             "lowest_price": ltp,
             "stop_loss": sl_price,
-            "target": target_price,
+            "target": t1_price,
+            "target_1": t1_price,
+            "target_2": t2_price,
+            "target_1_hit": False,
             "trailing_sl": sl_price,
             "trailing_step_pct": trail_pct,
             "margin_used": round(margin_req, 2),
@@ -915,6 +979,102 @@ class AlgoEngine:
 
         pnl_str = f"+₹{pnl:,.2f}" if pnl >= 0 else f"-₹{abs(pnl):,.2f}"
         self._log("EXIT", f"🏁 [{reason}] Closed {qty} {symbol} @ ₹{exit_price:.2f} | P&L: {pnl_str} ({pnl_pct:+.2f}%)")
+        self._record_equity_point()
+        self._save_state()
+
+    def _exit_partial_position(self, pos: dict, exit_qty: int, exit_price: float, reason: str):
+        """
+        Executes a partial exit (e.g. 50% at Target 1):
+        - Sends partial exit order to broker/paper engine.
+        - Calculates realized P&L on the exited portion.
+        - Logs trade record with 'PARTIAL' tag.
+        """
+        symbol = pos["symbol"]
+        side = pos["side"]
+        entry_p = pos["entry_price"]
+        product = pos["product"]
+
+        if side == "BUY":
+            pnl = (exit_price - entry_p) * exit_qty
+            pnl_pct = ((exit_price - entry_p) / entry_p) * 100.0
+            exit_side = "SELL"
+        else:
+            pnl = (entry_p - exit_price) * exit_qty
+            pnl_pct = ((entry_p - exit_price) / entry_p) * 100.0
+            exit_side = "BUY"
+
+        pnl = round(pnl, 2)
+        pnl_pct = round(pnl_pct, 2)
+
+        # Route partial exit order
+        if self.mode == "PAPER":
+            portfolio = self._web_state.get("paper_portfolio")
+            if portfolio:
+                try:
+                    portfolio.place_order(
+                        symbol=symbol,
+                        exchange="NSE",
+                        transaction=exit_side,
+                        quantity=exit_qty,
+                        order_type="MARKET",
+                        product=product,
+                        price=exit_price,
+                        tag=f"ALGO_PART_{reason[:8]}"
+                    )
+                except Exception as pe:
+                    logger.debug(f"Paper partial exit notice: {pe}")
+        else:
+            kite = self._web_state.get("kite")
+            if kite:
+                try:
+                    kite_txn = kite.TRANSACTION_TYPE_SELL if exit_side == "SELL" else kite.TRANSACTION_TYPE_BUY
+                    kite.place_order(
+                        variety=kite.VARIETY_REGULAR,
+                        exchange="NSE",
+                        tradingsymbol=symbol,
+                        transaction_type=kite_txn,
+                        quantity=exit_qty,
+                        product=kite.PRODUCT_MIS if product == "MIS" else kite.PRODUCT_CNC,
+                        order_type=kite.ORDER_TYPE_MARKET,
+                        tag=f"ALGO_PART_{reason[:8]}",
+                    )
+                except Exception as ke:
+                    logger.error(f"Live partial exit error for {symbol}: {ke}")
+
+        duration_sec = time.time() - pos.get("entry_timestamp", time.time())
+        duration_min = round(duration_sec / 60.0, 1)
+
+        trade_record = {
+            "trade_id": f"TR_PART_{symbol}_{int(time.time())}",
+            "symbol": symbol,
+            "strategy": pos.get("strategy_name", "Algo Strategy"),
+            "side": side,
+            "product": product,
+            "quantity": exit_qty,
+            "entry_price": entry_p,
+            "exit_price": exit_price,
+            "pnl": pnl,
+            "pnl_pct": pnl_pct,
+            "entry_time": pos.get("entry_time", ""),
+            "exit_time": datetime.now(IST).strftime("%H:%M:%S"),
+            "duration": f"{duration_min}m",
+            "exit_reason": reason,
+        }
+        self.closed_trades.insert(0, trade_record)
+
+        self.stats["realized_pnl"] = round(self.stats["realized_pnl"] + pnl, 2)
+        self.stats["total_trades"] += 1
+        if pnl > 0:
+            self.stats["winning_trades"] += 1
+        else:
+            self.stats["losing_trades"] += 1
+
+        win_rate = (self.stats["winning_trades"] / self.stats["total_trades"] * 100.0) if self.stats["total_trades"] > 0 else 0.0
+        self.stats["win_rate"] = round(win_rate, 1)
+
+        self._record_equity_point()
+        pnl_str = f"+₹{pnl:,.2f}" if pnl >= 0 else f"-₹{abs(pnl):,.2f}"
+        self._log("EXIT", f"🎯 [{reason}] Partial Closed {exit_qty} {symbol} @ ₹{exit_price:.2f} | P&L: {pnl_str} ({pnl_pct:+.2f}%)")
         self._save_state()
 
     def manual_exit_position(self, pos_id: str) -> dict:
@@ -1042,3 +1202,167 @@ class AlgoEngine:
             self._monitor_active_positions()
             self._scan_and_execute_signals()
             self._recalculate_stats()
+            self._record_equity_point()
+
+    # ─────────────────────────────────────────────────────────────
+    # INTRADAY EQUITY CURVE TRACKER
+    # ─────────────────────────────────────────────────────────────
+
+    def _record_equity_point(self, net_pnl: Optional[float] = None):
+        """Records a timestamped equity point for the live equity curve chart."""
+        now_str = datetime.now(IST).strftime("%H:%M:%S")
+        if net_pnl is None:
+            net_pnl = self.stats["realized_pnl"] + self.stats["unrealized_pnl"]
+        point = {
+            "time": now_str,
+            "pnl": round(float(net_pnl), 2),
+            "realized": round(float(self.stats["realized_pnl"]), 2),
+            "unrealized": round(float(self.stats["unrealized_pnl"]), 2),
+        }
+        # Update current second if already exists, else append
+        if self.equity_curve and self.equity_curve[-1]["time"] == now_str:
+            self.equity_curve[-1] = point
+        else:
+            self.equity_curve.append(point)
+            if len(self.equity_curve) > 250:
+                self.equity_curve.pop(0)
+
+    def get_equity_curve(self) -> List[dict]:
+        """Returns intraday equity time-series points for chart rendering."""
+        with self._lock:
+            if not self.equity_curve:
+                now_str = datetime.now(IST).strftime("%H:%M:%S")
+                return [{
+                    "time": now_str,
+                    "pnl": round(self.stats["today_pnl"], 2),
+                    "realized": round(self.stats["realized_pnl"], 2),
+                    "unrealized": round(self.stats["unrealized_pnl"], 2),
+                }]
+            return list(self.equity_curve)
+
+    # ─────────────────────────────────────────────────────────────
+    # 24/7 OFF-MARKET DEMO SIMULATION GENERATOR
+    # ─────────────────────────────────────────────────────────────
+
+    def run_demo_simulation(self) -> dict:
+        """
+        24/7 Off-Market Live Robot Simulation:
+        Generates simulated market ticks, triggers an Auto Buy, trails SL upwards,
+        books 50% at Target 1, moves SL to Cost (Risk-Free), and executes Target 2!
+        """
+        if self.mode != "PAPER":
+            return {"success": False, "error": "Demo Simulation can only be run in PAPER TRADING mode for safety."}
+
+        threading.Thread(target=self._demo_simulation_worker, daemon=True, name="DemoSimulationWorker").start()
+        return {"success": True, "message": "Demo simulation started! Watch live terminal and positions table."}
+
+    def _demo_simulation_worker(self):
+        """Simulates live tick movement over 15-20 seconds for demonstration."""
+        try:
+            sym = "TATASTEEL"
+            entry_p = 150.0
+            qty = 400
+            t1 = 151.50   # +1.0%
+            t2 = 153.00   # +2.0%
+            sl = 148.80   # -0.8%
+            margin_used = (entry_p * qty) / 5.0
+
+            self._log("ALERT", "🧪 [DEMO SIMULATION STARTED] 24/7 Off-Market Live Robot Testing", "Simulating live trade cycle...")
+            time.sleep(1.0)
+
+            self._log("SCAN", "Scanning universe symbols... evaluating EMA & Reversal setups")
+            time.sleep(1.5)
+
+            self._log("SIGNAL", f"🎯 [Momentum Trend] Signal Detected on {sym} @ ₹{entry_p:.2f}", "Fast EMA(9) crossed Slow EMA(21) | Price > VWAP")
+            time.sleep(1.0)
+
+            self._log("RMS", f"🛡️ RMS Check Approved: Daily P&L OK, Open Pos: 1/4 | Margin: ₹{margin_used:,.2f} (5X)")
+            time.sleep(0.8)
+
+            pos_id = f"POS_SIM_{sym}_{int(time.time())}"
+            with self._lock:
+                self.active_positions[pos_id] = {
+                    "pos_id": pos_id,
+                    "order_id": f"SIM_ORD_{int(time.time())}",
+                    "symbol": sym,
+                    "strategy_id": "momentum_trend",
+                    "strategy_name": "Momentum Trend (Demo)",
+                    "side": "BUY",
+                    "product": "MIS",
+                    "quantity": qty,
+                    "original_quantity": qty,
+                    "entry_price": entry_p,
+                    "current_price": entry_p,
+                    "highest_price": entry_p,
+                    "lowest_price": entry_p,
+                    "stop_loss": sl,
+                    "target_1": t1,
+                    "target_2": t2,
+                    "target": t1,
+                    "target_1_hit": False,
+                    "trailing_sl": sl,
+                    "trailing_step_pct": 0.3,
+                    "margin_used": margin_used,
+                    "pnl": 0.0,
+                    "pnl_pct": 0.0,
+                    "entry_time": datetime.now(IST).strftime("%H:%M:%S"),
+                    "entry_timestamp": time.time(),
+                }
+                self.stats["signals_today"] += 1
+                self.stats["orders_today"] += 1
+                self._record_equity_point()
+
+            self._log("ORDER", f"⚡ [AUTO BUY] EXECUTED: {qty} Qty {sym} @ ₹{entry_p:.2f} (5X Margin: ₹{margin_used:,.2f})",
+                      f"T1: ₹{t1:.2f} (+1.0%, 50% Qty) | T2: ₹{t2:.2f} (+2.0%) | SL: ₹{sl:.2f} (-0.8%)")
+
+            # Tick 1: Price rises to 150.60
+            time.sleep(3.0)
+            with self._lock:
+                if pos_id in self.active_positions:
+                    self.active_positions[pos_id]["current_price"] = 150.60
+                    self._monitor_active_positions()
+                    self._recalculate_stats()
+                    self._record_equity_point()
+
+            # Tick 2: Price rises to 151.10 -> Trailing SL ratchets up
+            time.sleep(3.0)
+            with self._lock:
+                if pos_id in self.active_positions:
+                    self.active_positions[pos_id]["current_price"] = 151.10
+                    self._monitor_active_positions()
+                    self._recalculate_stats()
+                    self._record_equity_point()
+
+            # Tick 3: Price hits Target 1 (151.60 >= 151.50) -> Partial 50% exit & SL moved to Cost!
+            time.sleep(3.5)
+            with self._lock:
+                if pos_id in self.active_positions:
+                    self.active_positions[pos_id]["current_price"] = 151.60
+                    self._monitor_active_positions()
+                    self._recalculate_stats()
+                    self._record_equity_point()
+
+            # Tick 4: Price surges further to 152.40 with Trailing SL
+            time.sleep(3.5)
+            with self._lock:
+                if pos_id in self.active_positions:
+                    self.active_positions[pos_id]["current_price"] = 152.40
+                    self._monitor_active_positions()
+                    self._recalculate_stats()
+                    self._record_equity_point()
+
+            # Tick 5: Price reaches Target 2 (153.20 >= 153.00) -> Final Target Exit!
+            time.sleep(3.5)
+            with self._lock:
+                if pos_id in self.active_positions:
+                    self.active_positions[pos_id]["current_price"] = 153.20
+                    self._monitor_active_positions()
+                    self._recalculate_stats()
+                    self._record_equity_point()
+
+            self._log("ALERT", "🎉 [DEMO SIMULATION COMPLETE] All targets hit!", "Both T1 (50% booked + Risk-Free) and T2 executed successfully.")
+            self._save_state()
+
+        except Exception as e:
+            logger.error(f"Demo simulation error: {e}", exc_info=True)
+            self._log("ERROR", f"Demo simulation error: {e}")

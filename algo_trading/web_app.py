@@ -636,6 +636,24 @@ def api_algo_kill_switch():
     return jsonify(engine.emergency_kill_switch())
 
 
+@app.route("/api/algo/simulate", methods=["POST"])
+def api_algo_simulate():
+    """🧪 24/7 Off-Market Live Robot Simulation"""
+    engine = _state.get("algo_engine")
+    if not engine:
+        return jsonify({"success": False, "error": "Algo engine not initialized"})
+    return jsonify(engine.run_demo_simulation())
+
+
+@app.route("/api/algo/equity")
+def api_algo_equity():
+    """Live intraday equity curve time-series points"""
+    engine = _state.get("algo_engine")
+    if not engine:
+        return jsonify([])
+    return jsonify(engine.get_equity_curve())
+
+
 # Legacy bot routes wired to algo engine
 @app.route("/api/bot/start", methods=["POST"])
 def api_bot_start():

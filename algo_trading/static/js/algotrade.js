@@ -23,6 +23,7 @@ function initAlgoTradePage() {
     fetchAlgoPositions();
     fetchAlgoTrades();
     fetchAlgoLogs();
+    loadAlgoEquityCurve();
 
     if (!_algoPollInterval) {
         _algoPollInterval = setInterval(() => {
@@ -31,10 +32,12 @@ function initAlgoTradePage() {
                 loadAlgoStatus();
                 fetchAlgoPositions();
                 fetchAlgoLogs();
+                loadAlgoEquityCurve();
             }
         }, 2000);
     }
 }
+
 
 // ─── 1. STATUS & KPI RENDERING ────────────────────────────────
 async function loadAlgoStatus() {
@@ -199,6 +202,27 @@ async function triggerAlgoScanNow() {
     }
 }
 
+async function triggerDemoSimulation() {
+    try {
+        showToast('🧪 Launching 24/7 Off-Market Live Simulation...', 'info');
+        const res = await fetch('/api/algo/simulate', { method: 'POST' });
+        const data = await res.json();
+        if (data.success) {
+            showToast(data.message || 'Demo simulation started! Check console & positions.', 'success');
+            setTimeout(() => {
+                fetchAlgoLogs();
+                fetchAlgoPositions();
+                loadAlgoEquityCurve();
+            }, 800);
+        } else {
+            showToast(data.error || 'Failed to start demo simulation', 'error');
+        }
+    } catch (e) {
+        showToast('Error triggering demo simulation', 'error');
+    }
+}
+
+
 // ─── 3. EMERGENCY KILL SWITCH ─────────────────────────────────
 function confirmKillSwitch() {
     const modal = document.getElementById('algo-kill-modal');
@@ -291,7 +315,8 @@ function renderStrategiesGrid(strategies) {
         const enabled = s.enabled !== false;
         const icon = s.icon || '📈';
         const badge = s.badge || s.timeframe || 'Intraday';
-        const targetPct = s.target_pct || 1.5;
+        const target1Pct = s.target_1_pct != null ? s.target_1_pct : 1.0;
+        const target2Pct = s.target_2_pct != null ? s.target_2_pct : (s.target_pct || 2.0);
         const slPct = s.sl_pct || 0.8;
         const trailPct = s.trailing_sl_pct || 0.3;
         const cap = (s.capital_per_trade || 20000).toLocaleString('en-IN');
@@ -319,8 +344,12 @@ function renderStrategiesGrid(strategies) {
 
                 <div class="strat-params-grid">
                     <div class="strat-param">
-                        <span class="param-lbl">Target</span>
-                        <span class="param-val green">+${targetPct}%</span>
+                        <span class="param-lbl">Target 1 (50%)</span>
+                        <span class="param-val green">+${target1Pct}%</span>
+                    </div>
+                    <div class="strat-param">
+                        <span class="param-lbl">Target 2 (Runner)</span>
+                        <span class="param-val green">+${target2Pct}%</span>
                     </div>
                     <div class="strat-param">
                         <span class="param-lbl">Stop Loss</span>
@@ -337,10 +366,6 @@ function renderStrategiesGrid(strategies) {
                     <div class="strat-param">
                         <span class="param-lbl">Capital / Trade</span>
                         <span class="param-val">₹${cap}</span>
-                    </div>
-                    <div class="strat-param">
-                        <span class="param-lbl">Product</span>
-                        <span class="param-val ${isMis ? 'green' : 'blue'}">${prod} ${isMis ? '(5X)' : ''}</span>
                     </div>
                 </div>
 
@@ -402,7 +427,8 @@ function openAlgoStratModal(stratId) {
 
     setVal('algo-modal-enabled', (s.enabled !== false).toString());
     setVal('algo-modal-timeframe', s.timeframe || '5m');
-    setVal('algo-modal-target-pct', s.target_pct || 1.5);
+    setVal('algo-modal-target1-pct', s.target_1_pct != null ? s.target_1_pct : 1.0);
+    setVal('algo-modal-target2-pct', s.target_2_pct != null ? s.target_2_pct : 2.0);
     setVal('algo-modal-sl-pct', s.sl_pct || 0.8);
     setVal('algo-modal-trail-pct', s.trailing_sl_pct || 0.3);
     setVal('algo-modal-capital', s.capital_per_trade || 20000);
@@ -422,17 +448,23 @@ async function saveAlgoStratModal() {
     const stratId = document.getElementById('algo-modal-strat-id').value;
     if (!stratId) return;
 
+    const t1Pct = parseFloat(document.getElementById('algo-modal-target1-pct').value) || 1.0;
+    const t2Pct = parseFloat(document.getElementById('algo-modal-target2-pct').value) || 2.0;
+
     const payload = {
         id: stratId,
         enabled: document.getElementById('algo-modal-enabled').value === 'true',
         timeframe: document.getElementById('algo-modal-timeframe').value,
-        target_pct: parseFloat(document.getElementById('algo-modal-target-pct').value) || 1.5,
+        target_1_pct: t1Pct,
+        target_2_pct: t2Pct,
+        target_pct: t2Pct,
         sl_pct: parseFloat(document.getElementById('algo-modal-sl-pct').value) || 0.8,
         trailing_sl_pct: parseFloat(document.getElementById('algo-modal-trail-pct').value) || 0.3,
         capital_per_trade: parseFloat(document.getElementById('algo-modal-capital').value) || 20000,
         product: document.getElementById('algo-modal-product').value,
         side: document.getElementById('algo-modal-side').value,
     };
+
 
     try {
         const res = await fetch('/api/algo/config', {
@@ -506,7 +538,7 @@ function renderAlgoPositionsTable(positions) {
     if (!tbody) return;
 
     if (!positions || positions.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="12" class="empty">No active positions open. Start bot to scan for auto entries.</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="14" class="empty">No active positions open. Start bot to scan for auto entries.</td></tr>';
         if (badge) badge.innerText = '0 Open';
         return;
     }
@@ -520,6 +552,14 @@ function renderAlgoPositionsTable(positions) {
         const pnlColor = pnl >= 0 ? 'green' : 'red';
         const pnlSign = pnl >= 0 ? '+' : '';
         const tvUrl = `https://www.tradingview.com/chart/?symbol=NSE:${encodeURIComponent(p.symbol)}`;
+
+        const t1 = p.target_1 || p.target || 0;
+        const t2 = p.target_2 || (p.entry_price ? (p.side === 'BUY' ? p.entry_price * 1.02 : p.entry_price * 0.98) : 0);
+
+        const isRiskFree = !!p.target_1_hit;
+        const statusBadge = isRiskFree
+            ? `<span class="badge-mini risk-free" title="Target 1 hit! 50% profit booked &amp; SL moved to Cost (Risk-Free)">🛡️ RISK-FREE (T1 HIT)</span>`
+            : `<span class="badge-mini blue">MONITORING</span>`;
 
         return `
             <tr>
@@ -536,11 +576,13 @@ function renderAlgoPositionsTable(positions) {
                 <td><strong>₹${(p.current_price || p.entry_price || 0).toFixed(2)}</strong></td>
                 <td class="red">₹${(p.stop_loss || 0).toFixed(2)}</td>
                 <td class="yellow"><strong>₹${(p.trailing_sl || p.stop_loss || 0).toFixed(2)}</strong></td>
-                <td class="green">₹${(p.target || 0).toFixed(2)}</td>
+                <td class="green">₹${t1.toFixed(2)}</td>
+                <td class="green">₹${t2.toFixed(2)}</td>
                 <td class="${pnlColor}">
                     <strong>${pnlSign}₹${Math.abs(pnl).toFixed(2)}</strong>
                     <small>(${pnlSign}${pnlPct.toFixed(2)}%)</small>
                 </td>
+                <td>${statusBadge}</td>
                 <td>
                     <button class="btn btn-sm btn-red" onclick="exitAlgoPosition('${p.pos_id}')" title="Manual Square Off">
                         Square Off
@@ -550,6 +592,7 @@ function renderAlgoPositionsTable(positions) {
         `;
     }).join('');
 }
+
 
 async function exitAlgoPosition(posId) {
     if (!confirm('Are you sure you want to manually square off this position?')) return;
@@ -675,10 +718,13 @@ function renderAlgoTradesTable(trades) {
         const tvUrl = `https://www.tradingview.com/chart/?symbol=NSE:${encodeURIComponent(t.symbol)}`;
 
         let reasonBadge = 'badge-mini grey';
-        if (t.exit_reason === 'TARGET_HIT') reasonBadge = 'badge-mini green';
-        else if (t.exit_reason === 'STOP_LOSS_HIT') reasonBadge = 'badge-mini red';
-        else if (t.exit_reason === 'TIME_CUTOFF') reasonBadge = 'badge-mini yellow';
-        else if (t.exit_reason === 'KILL_SWITCH') reasonBadge = 'badge-mini red';
+        const r = t.exit_reason || '';
+        if (r === 'TARGET_2_HIT' || r === 'TARGET_HIT') reasonBadge = 'badge-mini green glow';
+        else if (r === 'TARGET_1_HIT') reasonBadge = 'badge-mini green';
+        else if (r === 'COST_SL_HIT') reasonBadge = 'badge-mini purple';
+        else if (r === 'STOP_LOSS_HIT') reasonBadge = 'badge-mini red';
+        else if (r === 'TIME_CUTOFF') reasonBadge = 'badge-mini yellow';
+        else if (r === 'KILL_SWITCH') reasonBadge = 'badge-mini red';
 
         return `
             <tr>
@@ -702,6 +748,216 @@ function renderAlgoTradesTable(trades) {
         `;
     }).join('');
 }
+
+// ─── 10. LIVE INTRADAY P&L EQUITY CURVE CHART ─────────────────
+async function loadAlgoEquityCurve() {
+    try {
+        const res = await fetch('/api/algo/equity');
+        const points = await res.json();
+        renderEquityChart(points);
+    } catch (e) {
+        console.error('Failed to load algo equity curve:', e);
+    }
+}
+
+function renderEquityChart(points) {
+    const canvas = document.getElementById('algo-equity-canvas');
+    if (!canvas) return;
+
+    if (!Array.isArray(points) || points.length === 0) {
+        points = [{ time: '09:15:00', pnl: 0, realized: 0, unrealized: 0 }];
+    }
+
+    // Latest P&L
+    const latest = points[points.length - 1];
+    const currPnl = (latest && latest.pnl != null) ? latest.pnl : 0;
+
+    // Peak & Max Drawdown Calculation
+    let peak = 0;
+    let maxDd = 0;
+    for (const pt of points) {
+        const p = pt.pnl || 0;
+        if (p > peak) peak = p;
+        const dd = peak - p;
+        if (dd > maxDd) maxDd = dd;
+    }
+
+    const currEl = document.getElementById('algo-eq-curr');
+    const peakEl = document.getElementById('algo-eq-peak');
+    const ddEl = document.getElementById('algo-eq-dd');
+
+    if (currEl) {
+        const sign = currPnl >= 0 ? '+' : '-';
+        currEl.innerText = `${sign}₹${Math.abs(currPnl).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+        currEl.className = currPnl >= 0 ? 'green' : 'red';
+    }
+    if (peakEl) {
+        peakEl.innerText = `+₹${peak.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+        peakEl.className = 'green';
+    }
+    if (ddEl) {
+        ddEl.innerText = maxDd > 0 ? `-₹${maxDd.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '₹0.00';
+        ddEl.className = maxDd > 0 ? 'red' : '';
+    }
+
+    // High-DPI canvas setup
+    const dpr = window.devicePixelRatio || 1;
+    const rect = canvas.getBoundingClientRect();
+    const width = rect.width || canvas.clientWidth || 800;
+    const height = 130;
+
+    canvas.width = width * dpr;
+    canvas.height = height * dpr;
+
+    const ctx = canvas.getContext('2d');
+    ctx.scale(dpr, dpr);
+
+    const padLeft = 20;
+    const padRight = 75;
+    const padTop = 16;
+    const padBottom = 24;
+    const plotW = Math.max(10, width - padLeft - padRight);
+    const plotH = Math.max(10, height - padTop - padBottom);
+
+    ctx.clearRect(0, 0, width, height);
+
+    // Min and Max Y
+    let minY = Math.min(0, ...points.map(p => p.pnl || 0));
+    let maxY = Math.max(0, ...points.map(p => p.pnl || 0));
+
+    const range = Math.max(50, maxY - minY);
+    minY -= range * 0.15;
+    maxY += range * 0.15;
+    const ySpan = maxY - minY || 1;
+
+    const getX = (idx) => {
+        if (points.length <= 1) return padLeft + plotW / 2;
+        return padLeft + (idx / (points.length - 1)) * plotW;
+    };
+    const getY = (val) => {
+        return padTop + plotH - ((val - minY) / ySpan) * plotH;
+    };
+
+    // Draw Dashed Baseline at Zero
+    const zeroY = getY(0);
+    ctx.beginPath();
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.18)';
+    ctx.lineWidth = 1;
+    ctx.setLineDash([4, 4]);
+    ctx.moveTo(padLeft, zeroY);
+    ctx.lineTo(width - padRight, zeroY);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    // Baseline label
+    ctx.font = '10px Consolas, monospace';
+    ctx.fillStyle = '#64748b';
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('₹0.00', width - padRight + 8, zeroY);
+
+    // Peak label on right
+    if (maxY > 0) {
+        ctx.fillStyle = '#10b981';
+        ctx.fillText(`+₹${Math.round(maxY)}`, width - padRight + 8, padTop + 6);
+    }
+    // Min label on right
+    if (minY < 0) {
+        ctx.fillStyle = '#ef4444';
+        ctx.fillText(`-₹${Math.round(Math.abs(minY))}`, width - padRight + 8, padTop + plotH - 2);
+    }
+
+    if (points.length === 1) {
+        const x = getX(0);
+        const y = getY(points[0].pnl || 0);
+        ctx.beginPath();
+        ctx.arc(x, y, 4, 0, 2 * Math.PI);
+        ctx.fillStyle = points[0].pnl >= 0 ? '#10b981' : '#ef4444';
+        ctx.fill();
+        return;
+    }
+
+    // Color gradient & stroke
+    const isProfitable = currPnl >= 0;
+    const strokeColor = isProfitable ? '#10b981' : '#ef4444';
+    const fillTop = isProfitable ? 'rgba(16, 185, 129, 0.28)' : 'rgba(239, 68, 68, 0.28)';
+    const fillBottom = 'rgba(0, 0, 0, 0.0)';
+
+    // Gradient fill under curve
+    const grad = ctx.createLinearGradient(0, padTop, 0, padTop + plotH);
+    grad.addColorStop(0, fillTop);
+    grad.addColorStop(1, fillBottom);
+
+    ctx.beginPath();
+    ctx.moveTo(getX(0), getY(points[0].pnl || 0));
+
+    for (let i = 0; i < points.length - 1; i++) {
+        const x0 = getX(i);
+        const y0 = getY(points[i].pnl || 0);
+        const x1 = getX(i + 1);
+        const y1 = getY(points[i + 1].pnl || 0);
+        const xc = (x0 + x1) / 2;
+        ctx.bezierCurveTo(xc, y0, xc, y1, x1, y1);
+    }
+
+    ctx.lineTo(getX(points.length - 1), padTop + plotH);
+    ctx.lineTo(getX(0), padTop + plotH);
+    ctx.closePath();
+    ctx.fillStyle = grad;
+    ctx.fill();
+
+    // Line Stroke with Glow
+    ctx.save();
+    ctx.beginPath();
+    ctx.strokeStyle = strokeColor;
+    ctx.lineWidth = 2.2;
+    ctx.shadowColor = strokeColor;
+    ctx.shadowBlur = 8;
+    ctx.moveTo(getX(0), getY(points[0].pnl || 0));
+
+    for (let i = 0; i < points.length - 1; i++) {
+        const x0 = getX(i);
+        const y0 = getY(points[i].pnl || 0);
+        const x1 = getX(i + 1);
+        const y1 = getY(points[i + 1].pnl || 0);
+        const xc = (x0 + x1) / 2;
+        ctx.bezierCurveTo(xc, y0, xc, y1, x1, y1);
+    }
+    ctx.stroke();
+    ctx.restore();
+
+    // Glowing Pulse Head at latest point
+    const lastX = getX(points.length - 1);
+    const lastY = getY(currPnl);
+
+    ctx.beginPath();
+    ctx.arc(lastX, lastY, 5, 0, 2 * Math.PI);
+    ctx.fillStyle = strokeColor;
+    ctx.fill();
+
+    ctx.beginPath();
+    ctx.arc(lastX, lastY, 2, 0, 2 * Math.PI);
+    ctx.fillStyle = '#ffffff';
+    ctx.fill();
+
+    // Time Axis labels
+    ctx.font = '9.5px Consolas, monospace';
+    ctx.fillStyle = '#64748b';
+    ctx.textAlign = 'left';
+    ctx.fillText(points[0].time || '', padLeft, height - 6);
+
+    ctx.textAlign = 'right';
+    ctx.fillText(points[points.length - 1].time || '', width - padRight, height - 6);
+}
+
+// Re-render chart on window resize
+window.addEventListener('resize', () => {
+    const page = document.getElementById('page-algotrade');
+    if (page && page.classList.contains('active')) {
+        loadAlgoEquityCurve();
+    }
+});
+
 
 // ─── HELPERS ──────────────────────────────────────────────────
 function setText(id, text) {

@@ -1295,6 +1295,11 @@
                             ⚡ Scan Now (<span id="algo-scan-countdown">15</span>s)
                         </button>
 
+                        <!-- 24/7 Off-Market Demo Simulation -->
+                        <button class="btn btn-purple btn-algo-ctrl" onclick="triggerDemoSimulation()" title="24/7 Off-Market Live Simulation: Auto-Buy, Trailing SL, T1 50% Exit & T2 Exit">
+                            🧪 Demo Simulation
+                        </button>
+
                         <!-- Panic Kill Switch -->
                         <button class="btn btn-danger-kill" onclick="confirmKillSwitch()" title="Emergency: Square off all positions & halt bot immediately">
                             🚨 KILL SWITCH
@@ -1434,13 +1439,15 @@
                                 <th>LTP ₹</th>
                                 <th>Stop Loss ₹</th>
                                 <th>Trailing SL ₹</th>
-                                <th>Target ₹</th>
+                                <th>Target 1 ₹ (50%)</th>
+                                <th>Target 2 ₹ (Runner)</th>
                                 <th>Live P&amp;L</th>
+                                <th>Status</th>
                                 <th>Action</th>
                             </tr>
                         </thead>
                         <tbody id="algo-positions-tbody">
-                            <tr><td colspan="12" class="empty">No active positions open. Start bot to scan for auto entries.</td></tr>
+                            <tr><td colspan="14" class="empty">No active positions open. Start bot to scan for auto entries.</td></tr>
                         </tbody>
                     </table>
                 </div>
@@ -1477,7 +1484,29 @@
                 </div>
             </div>
 
-            <!-- 7. COMPLETED TRADES HISTORY -->
+            <!-- 7. LIVE INTRADAY P&L EQUITY CURVE CHART -->
+            <div class="panel algo-equity-panel">
+                <div class="algo-equity-header">
+                    <div style="display:flex;align-items:center;gap:10px">
+                        <span style="font-size:22px">📈</span>
+                        <div>
+                            <h3 style="margin:0;font-size:14px">Live Intraday P&amp;L Equity Curve</h3>
+                            <div style="font-size:11px;color:var(--text3)">Visual real-time trajectory of bot's cumulative profits &amp; losses</div>
+                        </div>
+                    </div>
+                    <div class="algo-equity-kpis">
+                        <div class="algo-eq-pill"><span class="eq-lbl">Current P&amp;L:</span> <strong id="algo-eq-curr" class="green">₹0.00</strong></div>
+                        <div class="algo-eq-pill"><span class="eq-lbl">Peak P&amp;L:</span> <strong id="algo-eq-peak" class="green">₹0.00</strong></div>
+                        <div class="algo-eq-pill"><span class="eq-lbl">Max Drawdown:</span> <strong id="algo-eq-dd" class="red">₹0.00</strong></div>
+                        <button class="btn btn-sm btn-grey" onclick="loadAlgoEquityCurve()" style="padding:3px 8px;font-size:11px">🔄 Refresh</button>
+                    </div>
+                </div>
+                <div class="algo-chart-wrapper">
+                    <canvas id="algo-equity-canvas" height="130"></canvas>
+                </div>
+            </div>
+
+            <!-- 8. COMPLETED TRADES HISTORY -->
             <div class="panel algo-trades-panel">
                 <div class="panel-header" style="display:flex;justify-content:space-between;align-items:center">
                     <div style="display:flex;align-items:center;gap:10px">
@@ -1551,9 +1580,15 @@
                         </div>
 
                         <div class="algo-modal-field">
-                            <label>Target Profit %</label>
-                            <input type="number" id="algo-modal-target-pct" class="ctrl-input" step="0.1" min="0.2" value="1.5">
-                            <small class="algo-field-hint">Auto profit booking price level (e.g. +1.5%)</small>
+                            <label>Target 1 % (Book 50% &amp; Move SL to Cost)</label>
+                            <input type="number" id="algo-modal-target1-pct" class="ctrl-input" step="0.1" min="0.2" value="1.0">
+                            <small class="algo-field-hint">Books 50% profit &amp; moves SL to Cost (Risk-Free)</small>
+                        </div>
+
+                        <div class="algo-modal-field">
+                            <label>Target 2 % (Final 50% Runner Exit)</label>
+                            <input type="number" id="algo-modal-target2-pct" class="ctrl-input" step="0.1" min="0.5" value="2.0">
+                            <small class="algo-field-hint">Maximum target with dynamic trailing SL</small>
                         </div>
 
                         <div class="algo-modal-field">

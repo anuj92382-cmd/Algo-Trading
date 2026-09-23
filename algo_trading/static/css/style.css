@@ -3632,3 +3632,100 @@ tr.row-crossed-break:hover {
     color: var(--text3);
     margin-top: 2px;
 }
+
+/* 🧪 Demo Simulation Button */
+.btn-purple {
+    background: linear-gradient(135deg, #7c3aed, #9333ea);
+    color: #fff;
+    border: 1px solid rgba(168, 85, 247, 0.4);
+    box-shadow: 0 2px 8px rgba(147, 51, 234, 0.25);
+}
+.btn-purple:hover {
+    background: linear-gradient(135deg, #6d28d9, #7e22ce);
+    box-shadow: 0 4px 14px rgba(147, 51, 234, 0.4);
+    transform: translateY(-1px);
+}
+
+/* 📈 Live Intraday Equity Curve Chart Panel */
+.algo-equity-panel {
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 16px 20px;
+    margin-bottom: 18px;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+}
+
+.algo-equity-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 12px;
+    margin-bottom: 14px;
+    padding-bottom: 12px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.algo-equity-kpis {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.algo-eq-pill {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 4px 10px;
+    font-size: 11.5px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-feature-settings: "tnum";
+}
+
+.algo-eq-pill .eq-lbl {
+    font-size: 10px;
+    text-transform: uppercase;
+    color: var(--text3);
+    font-weight: 600;
+    letter-spacing: 0.3px;
+}
+
+.algo-chart-wrapper {
+    position: relative;
+    width: 100%;
+    height: 140px;
+    background: #030712;
+    border: 1px solid rgba(255, 255, 255, 0.05);
+    border-radius: 6px;
+    overflow: hidden;
+}
+
+#algo-equity-canvas {
+    width: 100%;
+    height: 100%;
+    display: block;
+}
+
+/* 🛡️ 100% Risk-Free Badge */
+.badge-mini.risk-free {
+    background: rgba(16, 185, 129, 0.15);
+    color: #10b981;
+    border: 1px solid rgba(16, 185, 129, 0.4);
+    font-weight: 700;
+    letter-spacing: 0.3px;
+    box-shadow: 0 0 8px rgba(16, 185, 129, 0.25);
+    animation: riskFreeGlow 2.5s infinite ease-in-out;
+}
+
+@keyframes riskFreeGlow {
+    0%, 100% { box-shadow: 0 0 6px rgba(16, 185, 129, 0.2); }
+    50% { box-shadow: 0 0 12px rgba(16, 185, 129, 0.5); }
+}
+
+.badge-mini.glow {
+    box-shadow: 0 0 8px rgba(34, 197, 94, 0.4);
+}
