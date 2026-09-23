@@ -1,0 +1,724 @@
+/**
+ * algotrade.js - Autonomous Algo Trade Page Controller
+ * 100% Hands-Free Auto Buy / Auto Sell Engine
+ *
+ * Concepts Handled:
+ * - Master Robot Controls (Start Auto-Pilot, Pause, Stop, Mode Switch, Kill Switch)
+ * - Quantitative Strategy Toggles & Parameter Tuning
+ * - Risk Management System (RMS) & Circuit Breakers
+ * - Active Algo Positions Tracking with Dynamic Trailing Stop Loss
+ * - Live Streaming Terminal Console (Scans, Signals, Auto Orders, Exits)
+ * - Trade Analytics & Historical Execution Records
+ */
+
+let _algoPollInterval = null;
+let _algoCurrentFilter = 'ALL';
+let _algoStrategiesCache = {};
+let _algoLastLogCount = 0;
+
+// ─── INITIALIZATION ──────────────────────────────────────────
+function initAlgoTradePage() {
+    loadAlgoStatus();
+    loadAlgoConfig();
+    fetchAlgoPositions();
+    fetchAlgoTrades();
+    fetchAlgoLogs();
+
+    if (!_algoPollInterval) {
+        _algoPollInterval = setInterval(() => {
+            const page = document.getElementById('page-algotrade');
+            if (page && page.classList.contains('active')) {
+                loadAlgoStatus();
+                fetchAlgoPositions();
+                fetchAlgoLogs();
+            }
+        }, 2000);
+    }
+}
+
+// ─── 1. STATUS & KPI RENDERING ────────────────────────────────
+async function loadAlgoStatus() {
+    try {
+        const res = await fetch('/api/algo/status');
+        const data = await res.json();
+        renderAlgoStatus(data);
+    } catch (e) {
+        console.error('Failed to load algo status:', e);
+    }
+}
+
+function renderAlgoStatus(data) {
+    if (!data) return;
+
+    // Status Badge
+    const statusBadge = document.getElementById('algo-status-badge');
+    const startBtn = document.getElementById('algo-start-btn');
+    const pauseBtn = document.getElementById('algo-pause-btn');
+    const stopBtn = document.getElementById('algo-stop-btn');
+
+    const status = data.status || 'STOPPED';
+
+    if (status === 'RUNNING') {
+        statusBadge.className = 'badge-pill green pulse-green';
+        statusBadge.innerHTML = '● RUNNING (AUTO-PILOT)';
+        if (startBtn) startBtn.style.display = 'none';
+        if (pauseBtn) pauseBtn.style.display = 'inline-flex';
+        if (stopBtn) stopBtn.style.display = 'inline-flex';
+    } else if (status === 'PAUSED') {
+        statusBadge.className = 'badge-pill yellow';
+        statusBadge.innerHTML = '⏸ PAUSED (MONITORING)';
+        if (startBtn) {
+            startBtn.style.display = 'inline-flex';
+            startBtn.innerText = '▶ Resume Auto-Pilot';
+        }
+        if (pauseBtn) pauseBtn.style.display = 'none';
+        if (stopBtn) stopBtn.style.display = 'inline-flex';
+    } else {
+        statusBadge.className = 'badge-pill grey';
+        statusBadge.innerHTML = '● STOPPED';
+        if (startBtn) {
+            startBtn.style.display = 'inline-flex';
+            startBtn.innerText = '▶ Start Auto-Pilot';
+        }
+        if (pauseBtn) pauseBtn.style.display = 'none';
+        if (stopBtn) stopBtn.style.display = 'none';
+    }
+
+    // Mode Badge & Toggle Buttons
+    const mode = data.mode || 'PAPER';
+    const modeBadge = document.getElementById('algo-mode-badge');
+    const paperBtn = document.getElementById('algo-mode-paper-btn');
+    const liveBtn = document.getElementById('algo-mode-live-btn');
+
+    if (mode === 'PAPER') {
+        modeBadge.className = 'badge-pill purple';
+        modeBadge.innerHTML = '📄 PAPER (5X MARGIN)';
+        if (paperBtn) paperBtn.classList.add('active');
+        if (liveBtn) liveBtn.classList.remove('active');
+    } else {
+        modeBadge.className = 'badge-pill red pulse-red';
+        modeBadge.innerHTML = '🔴 LIVE (ZERODHA)';
+        if (paperBtn) paperBtn.classList.remove('active');
+        if (liveBtn) liveBtn.classList.add('active');
+    }
+
+    // Scan Countdown
+    const countdown = data.next_scan_countdown || 0;
+    const cdElem = document.getElementById('algo-scan-countdown');
+    if (cdElem) cdElem.innerText = countdown;
+
+    // KPIs
+    const stats = data.stats || {};
+    renderPnlElem('algo-kpi-net-pnl', stats.today_pnl || 0);
+    renderPnlElem('algo-kpi-realized-pnl', stats.realized_pnl || 0);
+    renderPnlElem('algo-kpi-unrealized-pnl', stats.unrealized_pnl || 0);
+
+    const activeCount = data.open_positions_count || 0;
+    const maxPos = (data.risk_config && data.risk_config.max_open_positions) || 4;
+    setText('algo-kpi-active-pos', `${activeCount} / ${maxPos}`);
+    setText('algo-kpi-win-rate', `${stats.win_rate || 0}%`);
+    setText('algo-kpi-total-trades', `${stats.total_trades || 0}`);
+    setText('algo-kpi-signals-count', `${stats.signals_today || 0}`);
+
+    // Circuit Breaker Alert
+    const cbAlert = document.getElementById('algo-circuit-breaker-alert');
+    if (data.circuit_breaker_hit) {
+        if (cbAlert) {
+            cbAlert.style.display = 'flex';
+            setText('algo-cb-reason', data.circuit_breaker_reason || 'Daily Loss Limit Breached');
+        }
+    } else {
+        if (cbAlert) cbAlert.style.display = 'none';
+    }
+}
+
+function renderPnlElem(elemId, val) {
+    const el = document.getElementById(elemId);
+    if (!el) return;
+    const v = parseFloat(val) || 0;
+    el.innerText = (v >= 0 ? '+₹' : '-₹') + Math.abs(v).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    el.className = 'algo-kpi-val ' + (v > 0 ? 'green' : v < 0 ? 'red' : '');
+}
+
+// ─── 2. MASTER CONTROLS & MODE TOGGLE ─────────────────────────
+async function toggleAlgoBot(action) {
+    try {
+        const res = await fetch('/api/algo/toggle', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: action })
+        });
+        const data = await res.json();
+        if (data.success) {
+            const labels = { start: 'Auto-Pilot Started! 🚀', pause: 'Auto-Pilot Paused ⏸️', stop: 'Auto-Pilot Stopped 🛑' };
+            showToast(labels[action] || 'Bot updated', 'success');
+            loadAlgoStatus();
+        } else {
+            showToast(data.error || 'Failed to update bot', 'error');
+        }
+    } catch (e) {
+        showToast('Server communication error', 'error');
+    }
+}
+
+async function setAlgoMode(mode) {
+    if (mode === 'LIVE') {
+        if (!confirm('⚠️ WARNING: Switching to LIVE TRADING mode will place REAL ORDERS on your Zerodha account using real money.\n\nAre you sure you want to proceed?')) {
+            return;
+        }
+    }
+
+    try {
+        const res = await fetch('/api/algo/mode', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ mode: mode })
+        });
+        const data = await res.json();
+        if (data.success) {
+            showToast(`Mode switched to ${mode} TRADING`, 'success');
+            loadAlgoStatus();
+        } else {
+            showToast(data.error || 'Failed to switch mode', 'error');
+        }
+    } catch (e) {
+        showToast('Error switching mode', 'error');
+    }
+}
+
+async function triggerAlgoScanNow() {
+    try {
+        const res = await fetch('/api/algo/scan_now', { method: 'POST' });
+        const data = await res.json();
+        if (data.success) {
+            showToast('⚡ Instant scan cycle triggered!', 'info');
+            setTimeout(fetchAlgoLogs, 1000);
+        }
+    } catch (e) {
+        showToast('Failed to trigger scan', 'error');
+    }
+}
+
+// ─── 3. EMERGENCY KILL SWITCH ─────────────────────────────────
+function confirmKillSwitch() {
+    const modal = document.getElementById('algo-kill-modal');
+    if (modal) modal.style.display = 'flex';
+}
+
+function closeKillModal() {
+    const modal = document.getElementById('algo-kill-modal');
+    if (modal) modal.style.display = 'none';
+}
+
+async function executeKillSwitch() {
+    closeKillModal();
+    try {
+        const res = await fetch('/api/algo/kill_switch', { method: 'POST' });
+        const data = await res.json();
+        if (data.success) {
+            showToast(data.message || '🚨 Emergency Kill Switch Executed!', 'error');
+            loadAlgoStatus();
+            fetchAlgoPositions();
+            fetchAlgoTrades();
+            fetchAlgoLogs();
+        } else {
+            showToast(data.error || 'Kill switch error', 'error');
+        }
+    } catch (e) {
+        showToast('Emergency trigger error', 'error');
+    }
+}
+
+async function resetCircuitBreaker() {
+    try {
+        const res = await fetch('/api/algo/config', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ risk_config: { circuit_breaker_hit: false, circuit_breaker_reason: '' } })
+        });
+        const data = await res.json();
+        if (data.success) {
+            showToast('Circuit breaker reset. Bot can now be started.', 'success');
+            loadAlgoStatus();
+        }
+    } catch (e) {
+        showToast('Failed to reset circuit breaker', 'error');
+    }
+}
+
+// ─── 4. QUANTITATIVE STRATEGIES GRID ──────────────────────────
+async function loadAlgoConfig() {
+    try {
+        const res = await fetch('/api/algo/config');
+        const data = await res.json();
+        if (data) {
+            // Universe
+            if (data.universe) {
+                const uSel = document.getElementById('algo-universe-select');
+                if (uSel) uSel.value = data.universe;
+            }
+
+            // RMS Fields
+            if (data.risk_config) {
+                const rc = data.risk_config;
+                setVal('algo-rms-max-loss', rc.max_daily_loss || 5000);
+                setVal('algo-rms-max-profit', rc.max_daily_profit || 15000);
+                setVal('algo-rms-max-positions', rc.max_open_positions || 4);
+            }
+
+            // Strategies Grid
+            if (data.strategies) {
+                _algoStrategiesCache = {};
+                data.strategies.forEach(s => _algoStrategiesCache[s.id] = s);
+                renderStrategiesGrid(data.strategies);
+            }
+        }
+    } catch (e) {
+        console.error('Failed to load algo config:', e);
+    }
+}
+
+function renderStrategiesGrid(strategies) {
+    const grid = document.getElementById('algo-strategies-grid');
+    if (!grid) return;
+
+    if (!strategies || strategies.length === 0) {
+        grid.innerHTML = '<div class="empty">No strategies configured</div>';
+        return;
+    }
+
+    grid.innerHTML = strategies.map(s => {
+        const enabled = s.enabled !== false;
+        const icon = s.icon || '📈';
+        const badge = s.badge || s.timeframe || 'Intraday';
+        const targetPct = s.target_pct || 1.5;
+        const slPct = s.sl_pct || 0.8;
+        const trailPct = s.trailing_sl_pct || 0.3;
+        const cap = (s.capital_per_trade || 20000).toLocaleString('en-IN');
+        const prod = s.product || 'MIS';
+        const isMis = (prod === 'MIS');
+        const signalsCount = s.signals_count || 0;
+
+        return `
+            <div class="algo-strat-card ${enabled ? 'active-strat' : 'disabled-strat'}" id="strat-card-${s.id}">
+                <div class="strat-card-header">
+                    <div class="strat-title-group">
+                        <span class="strat-icon">${icon}</span>
+                        <div>
+                            <div class="strat-name">${s.name}</div>
+                            <span class="badge-mini purple">${badge}</span>
+                        </div>
+                    </div>
+                    <label class="algo-switch" title="Toggle Strategy Auto-Trading">
+                        <input type="checkbox" id="chk-strat-${s.id}" ${enabled ? 'checked' : ''} onchange="toggleStrategyState('${s.id}', this.checked)">
+                        <span class="algo-slider"></span>
+                    </label>
+                </div>
+
+                <div class="strat-card-desc">${s.desc || ''}</div>
+
+                <div class="strat-params-grid">
+                    <div class="strat-param">
+                        <span class="param-lbl">Target</span>
+                        <span class="param-val green">+${targetPct}%</span>
+                    </div>
+                    <div class="strat-param">
+                        <span class="param-lbl">Stop Loss</span>
+                        <span class="param-val red">-${slPct}%</span>
+                    </div>
+                    <div class="strat-param">
+                        <span class="param-lbl">Trailing SL</span>
+                        <span class="param-val yellow">${trailPct}% step</span>
+                    </div>
+                    <div class="strat-param">
+                        <span class="param-lbl">Timeframe</span>
+                        <span class="param-val cyan">${s.timeframe || '5m'}</span>
+                    </div>
+                    <div class="strat-param">
+                        <span class="param-lbl">Capital / Trade</span>
+                        <span class="param-val">₹${cap}</span>
+                    </div>
+                    <div class="strat-param">
+                        <span class="param-lbl">Product</span>
+                        <span class="param-val ${isMis ? 'green' : 'blue'}">${prod} ${isMis ? '(5X)' : ''}</span>
+                    </div>
+                </div>
+
+                <div class="strat-card-footer">
+                    <div class="strat-signals-badge">
+                        <span>🎯 Signals:</span> <strong>${signalsCount}</strong>
+                    </div>
+                    <button class="btn btn-sm btn-grey" onclick="openAlgoStratModal('${s.id}')">
+                        ⚙️ Configure
+                    </button>
+                </div>
+            </div>
+        `;
+    }).join('');
+}
+
+async function toggleStrategyState(stratId, isEnabled) {
+    if (_algoStrategiesCache[stratId]) {
+        _algoStrategiesCache[stratId].enabled = isEnabled;
+    }
+
+    const card = document.getElementById(`strat-card-${stratId}`);
+    if (card) {
+        if (isEnabled) {
+            card.classList.add('active-strat');
+            card.classList.remove('disabled-strat');
+        } else {
+            card.classList.remove('active-strat');
+            card.classList.add('disabled-strat');
+        }
+    }
+
+    try {
+        const res = await fetch('/api/algo/config', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                strategies: [{ id: stratId, enabled: isEnabled }]
+            })
+        });
+        const data = await res.json();
+        if (data.success) {
+            showToast(`${_algoStrategiesCache[stratId]?.name || 'Strategy'} ${isEnabled ? 'ENABLED' : 'DISABLED'} for Auto Trading`, 'info');
+        }
+    } catch (e) {
+        showToast('Failed to toggle strategy', 'error');
+    }
+}
+
+// ─── 5. STRATEGY MODAL CONFIGURATION ──────────────────────────
+function openAlgoStratModal(stratId) {
+    const s = _algoStrategiesCache[stratId];
+    if (!s) return;
+
+    setVal('algo-modal-strat-id', s.id);
+    setText('algo-modal-strat-title', `${s.name} Configuration`);
+    setText('algo-modal-strat-icon', s.icon || '⚙️');
+    setText('algo-modal-strat-sub', `Configure execution rules for ${s.name}`);
+
+    setVal('algo-modal-enabled', (s.enabled !== false).toString());
+    setVal('algo-modal-timeframe', s.timeframe || '5m');
+    setVal('algo-modal-target-pct', s.target_pct || 1.5);
+    setVal('algo-modal-sl-pct', s.sl_pct || 0.8);
+    setVal('algo-modal-trail-pct', s.trailing_sl_pct || 0.3);
+    setVal('algo-modal-capital', s.capital_per_trade || 20000);
+    setVal('algo-modal-product', s.product || 'MIS');
+    setVal('algo-modal-side', s.side || 'BOTH');
+
+    const modal = document.getElementById('algo-strat-modal');
+    if (modal) modal.style.display = 'flex';
+}
+
+function closeAlgoStratModal() {
+    const modal = document.getElementById('algo-strat-modal');
+    if (modal) modal.style.display = 'none';
+}
+
+async function saveAlgoStratModal() {
+    const stratId = document.getElementById('algo-modal-strat-id').value;
+    if (!stratId) return;
+
+    const payload = {
+        id: stratId,
+        enabled: document.getElementById('algo-modal-enabled').value === 'true',
+        timeframe: document.getElementById('algo-modal-timeframe').value,
+        target_pct: parseFloat(document.getElementById('algo-modal-target-pct').value) || 1.5,
+        sl_pct: parseFloat(document.getElementById('algo-modal-sl-pct').value) || 0.8,
+        trailing_sl_pct: parseFloat(document.getElementById('algo-modal-trail-pct').value) || 0.3,
+        capital_per_trade: parseFloat(document.getElementById('algo-modal-capital').value) || 20000,
+        product: document.getElementById('algo-modal-product').value,
+        side: document.getElementById('algo-modal-side').value,
+    };
+
+    try {
+        const res = await fetch('/api/algo/config', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ strategies: [payload] })
+        });
+        const data = await res.json();
+        if (data.success) {
+            showToast('Strategy configuration saved!', 'success');
+            closeAlgoStratModal();
+            loadAlgoConfig();
+        } else {
+            showToast(data.error || 'Failed to save config', 'error');
+        }
+    } catch (e) {
+        showToast('Error saving strategy settings', 'error');
+    }
+}
+
+// ─── 6. RMS RISK CONTROLS SAVING ──────────────────────────────
+async function saveAlgoRMS() {
+    const universe = document.getElementById('algo-universe-select').value;
+    const maxLoss = parseFloat(document.getElementById('algo-rms-max-loss').value) || 5000;
+    const maxProfit = parseFloat(document.getElementById('algo-rms-max-profit').value) || 15000;
+    const maxPos = parseInt(document.getElementById('algo-rms-max-positions').value) || 4;
+
+    try {
+        const res = await fetch('/api/algo/config', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                universe: universe,
+                risk_config: {
+                    max_daily_loss: maxLoss,
+                    max_daily_profit: maxProfit,
+                    max_open_positions: maxPos,
+                }
+            })
+        });
+        const data = await res.json();
+        if (data.success) {
+            showToast('🛡️ Risk Management Rules Saved!', 'success');
+            loadAlgoStatus();
+        } else {
+            showToast(data.error || 'Failed to save RMS', 'error');
+        }
+    } catch (e) {
+        showToast('Error saving RMS rules', 'error');
+    }
+}
+
+function updateAlgoRMS() {
+    saveAlgoRMS();
+}
+
+// ─── 7. ACTIVE ALGO POSITIONS TABLE ───────────────────────────
+async function fetchAlgoPositions() {
+    try {
+        const res = await fetch('/api/algo/positions');
+        const positions = await res.json();
+        renderAlgoPositionsTable(positions);
+    } catch (e) {
+        console.error('Error fetching algo positions:', e);
+    }
+}
+
+function renderAlgoPositionsTable(positions) {
+    const tbody = document.getElementById('algo-positions-tbody');
+    const badge = document.getElementById('algo-active-pos-count');
+    if (!tbody) return;
+
+    if (!positions || positions.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="12" class="empty">No active positions open. Start bot to scan for auto entries.</td></tr>';
+        if (badge) badge.innerText = '0 Open';
+        return;
+    }
+
+    if (badge) badge.innerText = `${positions.length} Open`;
+
+    tbody.innerHTML = positions.map(p => {
+        const sideClass = (p.side === 'BUY') ? 'badge-mini green' : 'badge-mini red';
+        const pnl = p.pnl || 0;
+        const pnlPct = p.pnl_pct || 0;
+        const pnlColor = pnl >= 0 ? 'green' : 'red';
+        const pnlSign = pnl >= 0 ? '+' : '';
+        const tvUrl = `https://www.tradingview.com/chart/?symbol=NSE:${encodeURIComponent(p.symbol)}`;
+
+        return `
+            <tr>
+                <td>
+                    <a href="${tvUrl}" target="_blank" rel="noopener noreferrer" class="stock-chart-link" title="Open TradingView Chart">
+                        <strong>${p.symbol}</strong> ↗
+                    </a>
+                </td>
+                <td><span class="badge-mini purple">${p.strategy_name || 'Algo'}</span></td>
+                <td><span class="${sideClass}">${p.side}</span></td>
+                <td><span class="badge-mini blue">${p.product} (5X)</span></td>
+                <td>${p.quantity}</td>
+                <td>₹${(p.entry_price || 0).toFixed(2)}</td>
+                <td><strong>₹${(p.current_price || p.entry_price || 0).toFixed(2)}</strong></td>
+                <td class="red">₹${(p.stop_loss || 0).toFixed(2)}</td>
+                <td class="yellow"><strong>₹${(p.trailing_sl || p.stop_loss || 0).toFixed(2)}</strong></td>
+                <td class="green">₹${(p.target || 0).toFixed(2)}</td>
+                <td class="${pnlColor}">
+                    <strong>${pnlSign}₹${Math.abs(pnl).toFixed(2)}</strong>
+                    <small>(${pnlSign}${pnlPct.toFixed(2)}%)</small>
+                </td>
+                <td>
+                    <button class="btn btn-sm btn-red" onclick="exitAlgoPosition('${p.pos_id}')" title="Manual Square Off">
+                        Square Off
+                    </button>
+                </td>
+            </tr>
+        `;
+    }).join('');
+}
+
+async function exitAlgoPosition(posId) {
+    if (!confirm('Are you sure you want to manually square off this position?')) return;
+
+    try {
+        const res = await fetch('/api/algo/position/exit', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ pos_id: posId })
+        });
+        const data = await res.json();
+        if (data.success) {
+            showToast(data.message || 'Position squared off', 'success');
+            fetchAlgoPositions();
+            fetchAlgoTrades();
+            fetchAlgoLogs();
+        } else {
+            showToast(data.error || 'Failed to exit position', 'error');
+        }
+    } catch (e) {
+        showToast('Error exiting position', 'error');
+    }
+}
+
+// ─── 8. LIVE TERMINAL LOGS CONSOLE ────────────────────────────
+async function fetchAlgoLogs() {
+    try {
+        const res = await fetch('/api/algo/logs?limit=200');
+        const logs = await res.json();
+        renderAlgoLogs(logs);
+    } catch (e) {
+        console.error('Error fetching algo logs:', e);
+    }
+}
+
+function renderAlgoLogs(logs) {
+    const termBody = document.getElementById('algo-terminal-body');
+    if (!termBody || !logs) return;
+
+    // Filter logs
+    const filtered = (_algoCurrentFilter === 'ALL')
+        ? logs
+        : logs.filter(l => (l.level || '').toUpperCase() === _algoCurrentFilter);
+
+    if (filtered.length === 0) {
+        termBody.innerHTML = '<div class="term-line muted"><span class="term-time">[--:--:--]</span> No activity logs matching selected filter.</div>';
+        return;
+    }
+
+    termBody.innerHTML = filtered.map(l => {
+        const lvl = (l.level || 'INFO').toUpperCase();
+        let cssClass = 'info';
+        if (lvl === 'SIGNAL') cssClass = 'signal';
+        else if (lvl === 'ORDER') cssClass = 'order';
+        else if (lvl === 'TRAIL') cssClass = 'trail';
+        else if (lvl === 'EXIT') cssClass = 'exit';
+        else if (lvl === 'ALERT' || lvl === 'ERROR') cssClass = 'alert';
+        else if (lvl === 'SCAN') cssClass = 'scan';
+
+        const detailSpan = l.details ? `<span class="term-details"> | ${escapeHtml(l.details)}</span>` : '';
+
+        return `
+            <div class="term-line ${cssClass}">
+                <span class="term-time">[${l.time}]</span>
+                <span class="term-tag ${cssClass}">[${lvl}]</span>
+                <span class="term-msg">${escapeHtml(l.message)}</span>
+                ${detailSpan}
+            </div>
+        `;
+    }).join('');
+
+    // Auto scroll if enabled
+    const autoScroll = document.getElementById('algo-autoscroll-chk');
+    if (autoScroll && autoScroll.checked) {
+        termBody.scrollTop = termBody.scrollHeight;
+    }
+}
+
+function filterAlgoLogs(filterName) {
+    _algoCurrentFilter = filterName;
+    document.querySelectorAll('.algo-term-btn').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.filter === filterName);
+    });
+    fetchAlgoLogs();
+}
+
+function clearAlgoLogs() {
+    const termBody = document.getElementById('algo-terminal-body');
+    if (termBody) {
+        termBody.innerHTML = '<div class="term-line muted"><span class="term-time">[00:00:00]</span> Console cleared by user.</div>';
+    }
+}
+
+// ─── 9. COMPLETED TRADES HISTORY ──────────────────────────────
+async function fetchAlgoTrades() {
+    try {
+        const res = await fetch('/api/algo/trades?limit=50');
+        const trades = await res.json();
+        renderAlgoTradesTable(trades);
+    } catch (e) {
+        console.error('Error fetching algo trades:', e);
+    }
+}
+
+function renderAlgoTradesTable(trades) {
+    const tbody = document.getElementById('algo-trades-tbody');
+    const badge = document.getElementById('algo-closed-trades-count');
+    if (!tbody) return;
+
+    if (!trades || trades.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="12" class="empty">No completed trades yet today.</td></tr>';
+        if (badge) badge.innerText = '0 Closed';
+        return;
+    }
+
+    if (badge) badge.innerText = `${trades.length} Closed`;
+
+    tbody.innerHTML = trades.map(t => {
+        const pnl = t.pnl || 0;
+        const pnlPct = t.pnl_pct || 0;
+        const pnlColor = pnl >= 0 ? 'green' : 'red';
+        const pnlSign = pnl >= 0 ? '+' : '';
+        const tvUrl = `https://www.tradingview.com/chart/?symbol=NSE:${encodeURIComponent(t.symbol)}`;
+
+        let reasonBadge = 'badge-mini grey';
+        if (t.exit_reason === 'TARGET_HIT') reasonBadge = 'badge-mini green';
+        else if (t.exit_reason === 'STOP_LOSS_HIT') reasonBadge = 'badge-mini red';
+        else if (t.exit_reason === 'TIME_CUTOFF') reasonBadge = 'badge-mini yellow';
+        else if (t.exit_reason === 'KILL_SWITCH') reasonBadge = 'badge-mini red';
+
+        return `
+            <tr>
+                <td>
+                    <a href="${tvUrl}" target="_blank" rel="noopener noreferrer" class="stock-chart-link">
+                        <strong>${t.symbol}</strong> ↗
+                    </a>
+                </td>
+                <td><span class="badge-mini purple">${t.strategy || 'Algo'}</span></td>
+                <td><span class="badge-mini ${t.side === 'BUY' ? 'green' : 'red'}">${t.side}</span></td>
+                <td><span class="badge-mini blue">${t.product || 'MIS'}</span></td>
+                <td>${t.quantity}</td>
+                <td>₹${(t.entry_price || 0).toFixed(2)}</td>
+                <td>₹${(t.exit_price || 0).toFixed(2)}</td>
+                <td class="${pnlColor}"><strong>${pnlSign}₹${Math.abs(pnl).toFixed(2)}</strong></td>
+                <td class="${pnlColor}">${pnlSign}${pnlPct.toFixed(2)}%</td>
+                <td>${t.duration || '--'}</td>
+                <td><span class="${reasonBadge}">${t.exit_reason || 'EXIT'}</span></td>
+                <td>${t.exit_time || '--'}</td>
+            </tr>
+        `;
+    }).join('');
+}
+
+// ─── HELPERS ──────────────────────────────────────────────────
+function setText(id, text) {
+    const el = document.getElementById(id);
+    if (el) el.innerText = text;
+}
+
+function setVal(id, val) {
+    const el = document.getElementById(id);
+    if (el) el.value = val;
+}
+
+function escapeHtml(str) {
+    if (!str) return '';
+    return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+}

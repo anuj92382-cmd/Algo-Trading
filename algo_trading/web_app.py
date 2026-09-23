@@ -59,12 +59,20 @@ _state = {
     "user_id":         "",
     "error":           "",
     "paper_portfolio": None,  # Paper trading portfolio tracker
+    "algo_engine":     None,  # Autonomous Algo Trading Engine
 }
 
 # Initialize paper portfolio if in paper mode
 if IS_PAPER_TRADING:
     _state["paper_portfolio"] = PaperPortfolio()
     logger.info("📄 Paper Portfolio initialized")
+
+try:
+    from algo_engine import AlgoEngine
+    _state["algo_engine"] = AlgoEngine(_state)
+    logger.info("⚡ Autonomous AlgoEngine attached to web_state")
+except Exception as _algo_err:
+    logger.error(f"Failed to initialize AlgoEngine: {_algo_err}")
 
 TOKEN_FILE = Path("data/access_token.json")
 
@@ -503,28 +511,150 @@ def api_orders():
         return jsonify([])
 
 
+# ─────────────────────────────────────────────────────────────
+# ⚡ AUTONOMOUS ALGO TRADE APIs (AUTO BUY / AUTO SELL ENGINE)
+# ─────────────────────────────────────────────────────────────
+
+@app.route("/api/algo/status")
+def api_algo_status():
+    """Returns live status of autonomous Algo Engine"""
+    engine = _state.get("algo_engine")
+    if not engine:
+        return jsonify({"status": "STOPPED", "mode": "PAPER", "error": "Algo engine not initialized"})
+    return jsonify(engine.get_status())
+
+
+@app.route("/api/algo/toggle", methods=["POST"])
+def api_algo_toggle():
+    """Starts, pauses, or stops the autonomous Algo Engine"""
+    engine = _state.get("algo_engine")
+    if not engine:
+        return jsonify({"success": False, "error": "Algo engine not initialized"})
+
+    body = request.get_json(silent=True) or {}
+    action = body.get("action", "start").lower().strip()
+
+    if action == "start":
+        res = engine.start()
+        _state["bot_running"] = (engine.status == "RUNNING")
+        return jsonify(res)
+    elif action == "pause":
+        res = engine.pause()
+        _state["bot_running"] = False
+        return jsonify(res)
+    elif action == "stop":
+        res = engine.stop()
+        _state["bot_running"] = False
+        return jsonify(res)
+    else:
+        return jsonify({"success": False, "error": f"Unknown action: {action}"})
+
+
+@app.route("/api/algo/mode", methods=["POST"])
+def api_algo_mode():
+    """Toggles execution mode between PAPER (5X Intraday Margin) and LIVE (Zerodha)"""
+    engine = _state.get("algo_engine")
+    if not engine:
+        return jsonify({"success": False, "error": "Algo engine not initialized"})
+
+    body = request.get_json(silent=True) or {}
+    mode = body.get("mode", "PAPER").upper().strip()
+    return jsonify(engine.set_mode(mode))
+
+
+@app.route("/api/algo/config", methods=["GET", "POST"])
+def api_algo_config():
+    """GET strategy & risk config, or POST updates to parameters"""
+    engine = _state.get("algo_engine")
+    if not engine:
+        return jsonify({"error": "Algo engine not initialized"})
+
+    if request.method == "POST":
+        body = request.get_json(silent=True) or {}
+        return jsonify(engine.update_config(body))
+    else:
+        return jsonify(engine.get_config())
+
+
+@app.route("/api/algo/positions")
+def api_algo_positions():
+    """Active positions opened and monitored by Algo Engine"""
+    engine = _state.get("algo_engine")
+    if not engine:
+        return jsonify([])
+    return jsonify(engine.get_active_positions())
+
+
+@app.route("/api/algo/position/exit", methods=["POST"])
+def api_algo_position_exit():
+    """Manual square-off of an active algo position"""
+    engine = _state.get("algo_engine")
+    if not engine:
+        return jsonify({"success": False, "error": "Algo engine not initialized"})
+
+    body = request.get_json(silent=True) or {}
+    pos_id = body.get("pos_id", "")
+    return jsonify(engine.manual_exit_position(pos_id))
+
+
+@app.route("/api/algo/trades")
+def api_algo_trades():
+    """Completed algo trades history with P&L and exit reasons"""
+    engine = _state.get("algo_engine")
+    if not engine:
+        return jsonify([])
+    limit = int(request.args.get("limit", 50))
+    return jsonify(engine.get_closed_trades(limit=limit))
+
+
+@app.route("/api/algo/logs")
+def api_algo_logs():
+    """Live streaming terminal logs from the autonomous engine"""
+    engine = _state.get("algo_engine")
+    if not engine:
+        return jsonify([])
+    limit = int(request.args.get("limit", 150))
+    return jsonify(engine.get_recent_logs(limit=limit))
+
+
+@app.route("/api/algo/scan_now", methods=["POST"])
+def api_algo_scan_now():
+    """Triggers an immediate on-demand scan and execution cycle"""
+    engine = _state.get("algo_engine")
+    if not engine:
+        return jsonify({"success": False, "error": "Algo engine not initialized"})
+    return jsonify(engine.force_scan_now())
+
+
+@app.route("/api/algo/kill_switch", methods=["POST"])
+def api_algo_kill_switch():
+    """🚨 EMERGENCY KILL SWITCH: Halt bot and square-off ALL open positions immediately"""
+    engine = _state.get("algo_engine")
+    if not engine:
+        return jsonify({"success": False, "error": "Algo engine not initialized"})
+    _state["bot_running"] = False
+    return jsonify(engine.emergency_kill_switch())
+
+
+# Legacy bot routes wired to algo engine
 @app.route("/api/bot/start", methods=["POST"])
 def api_bot_start():
-    if not _state["logged_in"]:
-        return jsonify({"success": False, "error": "Pehle login karo"})
-    if _state["bot_running"]:
-        return jsonify({"success": False, "error": "Bot already running hai"})
-
+    engine = _state.get("algo_engine")
+    if engine:
+        res = engine.start()
+        _state["bot_running"] = (engine.status == "RUNNING")
+        return jsonify(res)
     _state["bot_running"] = True
-
-    def _loop():
-        import time
-        logger.info("🤖 Bot loop started")
-        while _state["bot_running"]:
-            time.sleep(5)
-        logger.info("🛑 Bot loop stopped")
-
-    threading.Thread(target=_loop, daemon=True).start()
     return jsonify({"success": True, "message": "Bot started!"})
 
 
 @app.route("/api/bot/stop", methods=["POST"])
 def api_bot_stop():
+    engine = _state.get("algo_engine")
+    if engine:
+        res = engine.stop()
+        _state["bot_running"] = False
+        return jsonify(res)
     _state["bot_running"] = False
     return jsonify({"success": True, "message": "Bot stopped"})
 

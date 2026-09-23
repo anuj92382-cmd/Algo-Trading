@@ -21,6 +21,11 @@
             <span class="nav-icon">📊</span>
             <span class="nav-label">Dashboard</span>
         </a>
+        <a class="nav-item" data-page="algotrade" onclick="showPage('algotrade')">
+            <span class="nav-icon">⚡</span>
+            <span class="nav-label">Algo Trade</span>
+            <span class="nav-badge green" id="algotrade-badge">AUTO</span>
+        </a>
         <a class="nav-item" data-page="gainers" onclick="showPage('gainers')">
             <span class="nav-icon">🚀</span>
             <span class="nav-label">Top Gainers</span>
@@ -1244,6 +1249,389 @@
             </div>
         </section>
 
+        <!-- ══════════════════════════════════════════════════
+             ⚡ ALGO TRADE - AUTONOMOUS TRADING ENGINE
+        ═══════════════════════════════════════════════════ -->
+        <section id="page-algotrade" class="page">
+            <!-- 1. MASTER HUD & CONTROLS BAR -->
+            <div class="algo-hud-card">
+                <div class="algo-hud-top">
+                    <div class="algo-hud-title-box">
+                        <div class="algo-title-row">
+                            <span class="algo-title-icon">⚡</span>
+                            <h2 class="algo-title">Algo Trade Auto-Pilot</h2>
+                            <span class="badge-pill grey" id="algo-status-badge">● STOPPED</span>
+                            <span class="badge-pill purple" id="algo-mode-badge">📄 PAPER (5X MARGIN)</span>
+                        </div>
+                        <div class="algo-subtitle">
+                            Autonomous Quantitative Robot • Continuous Market Scan • 100% Hands-Free Auto Buy / Auto Sell
+                        </div>
+                    </div>
+
+                    <div class="algo-hud-actions">
+                        <!-- Mode toggle -->
+                        <div class="algo-mode-switch-group">
+                            <button type="button" class="algo-mode-btn active" id="algo-mode-paper-btn" onclick="setAlgoMode('PAPER')">
+                                📄 Paper Mode
+                            </button>
+                            <button type="button" class="algo-mode-btn" id="algo-mode-live-btn" onclick="setAlgoMode('LIVE')">
+                                🔴 Live Broker
+                            </button>
+                        </div>
+
+                        <!-- Start / Pause / Stop -->
+                        <button class="btn btn-green btn-algo-ctrl" id="algo-start-btn" onclick="toggleAlgoBot('start')">
+                            ▶ Start Auto-Pilot
+                        </button>
+                        <button class="btn btn-yellow btn-algo-ctrl" id="algo-pause-btn" onclick="toggleAlgoBot('pause')" style="display:none">
+                            ⏸ Pause
+                        </button>
+                        <button class="btn btn-grey btn-algo-ctrl" id="algo-stop-btn" onclick="toggleAlgoBot('stop')" style="display:none">
+                            ⏹ Stop
+                        </button>
+
+                        <!-- Scan now trigger -->
+                        <button class="btn btn-cyan btn-algo-ctrl" onclick="triggerAlgoScanNow()" title="Trigger immediate scan cycle">
+                            ⚡ Scan Now (<span id="algo-scan-countdown">15</span>s)
+                        </button>
+
+                        <!-- Panic Kill Switch -->
+                        <button class="btn btn-danger-kill" onclick="confirmKillSwitch()" title="Emergency: Square off all positions & halt bot immediately">
+                            🚨 KILL SWITCH
+                        </button>
+                    </div>
+                </div>
+
+                <!-- 2. KPI METRICS STRIP -->
+                <div class="algo-kpi-strip">
+                    <div class="algo-kpi-item">
+                        <span class="algo-kpi-lbl">Today's Net P&amp;L</span>
+                        <span class="algo-kpi-val" id="algo-kpi-net-pnl">₹0.00</span>
+                    </div>
+                    <div class="algo-kpi-item">
+                        <span class="algo-kpi-lbl">Realized P&amp;L</span>
+                        <span class="algo-kpi-val" id="algo-kpi-realized-pnl">₹0.00</span>
+                    </div>
+                    <div class="algo-kpi-item">
+                        <span class="algo-kpi-lbl">Unrealized P&amp;L</span>
+                        <span class="algo-kpi-val" id="algo-kpi-unrealized-pnl">₹0.00</span>
+                    </div>
+                    <div class="algo-kpi-item">
+                        <span class="algo-kpi-lbl">Active Positions</span>
+                        <span class="algo-kpi-val yellow" id="algo-kpi-active-pos">0 / 4</span>
+                    </div>
+                    <div class="algo-kpi-item">
+                        <span class="algo-kpi-lbl">Win Rate %</span>
+                        <span class="algo-kpi-val cyan" id="algo-kpi-win-rate">0.0%</span>
+                    </div>
+                    <div class="algo-kpi-item">
+                        <span class="algo-kpi-lbl">Completed Trades</span>
+                        <span class="algo-kpi-val" id="algo-kpi-total-trades">0</span>
+                    </div>
+                    <div class="algo-kpi-item">
+                        <span class="algo-kpi-lbl">Signals Today</span>
+                        <span class="algo-kpi-val purple" id="algo-kpi-signals-count">0</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 3. RISK MANAGEMENT & UNIVERSE BAR -->
+            <div class="panel algo-rms-panel">
+                <div class="algo-rms-header">
+                    <div class="algo-rms-title">
+                        🛡️ <strong>Risk Management &amp; Circuit Breakers (RMS)</strong>
+                        <span class="algo-rms-sub">Automatic capital protection and intraday cutoff rules</span>
+                    </div>
+                    <div id="algo-circuit-breaker-alert" class="algo-cb-alert" style="display:none">
+                        ⚠️ <strong>CIRCUIT BREAKER TRIGGERED:</strong> <span id="algo-cb-reason">--</span>
+                        <button class="btn btn-sm btn-yellow" onclick="resetCircuitBreaker()">Reset Lock</button>
+                    </div>
+                </div>
+
+                <div class="algo-rms-grid">
+                    <div class="algo-rms-field">
+                        <label>Universe (Scan List)</label>
+                        <select id="algo-universe-select" class="ctrl-select" onchange="updateAlgoRMS()">
+                            <option value="nifty50" selected>🔵 Nifty 50 (Bluechips)</option>
+                            <option value="fno">🎯 Nifty F&amp;O (~185 Liquid)</option>
+                            <option value="nifty100">📈 Nifty 100</option>
+                            <option value="watchlist">⭐ My Watchlist</option>
+                        </select>
+                    </div>
+
+                    <div class="algo-rms-field">
+                        <label>Max Daily Loss Limit (₹)</label>
+                        <input type="number" id="algo-rms-max-loss" class="ctrl-input" value="5000" step="500" min="500">
+                    </div>
+
+                    <div class="algo-rms-field">
+                        <label>Max Daily Profit Target (₹)</label>
+                        <input type="number" id="algo-rms-max-profit" class="ctrl-input" value="15000" step="1000" min="1000">
+                    </div>
+
+                    <div class="algo-rms-field">
+                        <label>Max Open Positions</label>
+                        <select id="algo-rms-max-positions" class="ctrl-select">
+                            <option value="1">1 Stock Max</option>
+                            <option value="2">2 Stocks Max</option>
+                            <option value="3">3 Stocks Max</option>
+                            <option value="4" selected>4 Stocks Max</option>
+                            <option value="5">5 Stocks Max</option>
+                            <option value="8">8 Stocks Max</option>
+                        </select>
+                    </div>
+
+                    <div class="algo-rms-field">
+                        <label>Timing Rules (IST)</label>
+                        <div class="algo-timing-pill">
+                            <span>Entries: <strong>09:20 - 14:45</strong></span>
+                            <span class="sep">|</span>
+                            <span>Auto Square-off: <strong class="red">15:15 PM</strong></span>
+                        </div>
+                    </div>
+
+                    <div class="algo-rms-field algo-rms-action">
+                        <label>&nbsp;</label>
+                        <button class="btn btn-blue" onclick="saveAlgoRMS()" style="width:100%">💾 Save RMS Rules</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 4. QUANTITATIVE STRATEGIES GRID -->
+            <div class="algo-section-header">
+                <div class="algo-section-title">
+                    🤖 <strong>Quantitative Strategy Engine</strong>
+                    <span class="algo-section-sub">Enable/Disable strategies &amp; customize parameters for auto buy/sell</span>
+                </div>
+            </div>
+
+            <div class="algo-strategies-grid" id="algo-strategies-grid">
+                <!-- Dynamically rendered via algotrade.js -->
+                <div class="algo-loading">Loading quantitative strategies...</div>
+            </div>
+
+            <!-- 5. ACTIVE ALGO POSITIONS -->
+            <div class="panel algo-positions-panel">
+                <div class="panel-header" style="display:flex;justify-content:space-between;align-items:center">
+                    <div style="display:flex;align-items:center;gap:10px">
+                        <h3>⚡ Active Algo Positions (Live Monitoring)</h3>
+                        <span class="badge-mini yellow" id="algo-active-pos-count">0 Open</span>
+                    </div>
+                    <div style="font-size:12px;color:var(--text3)">
+                        Trailing SL dynamically locks profits • Auto exits at Target / Stop Loss
+                    </div>
+                </div>
+                <div class="table-wrap">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Symbol</th>
+                                <th>Strategy</th>
+                                <th>Side</th>
+                                <th>Product</th>
+                                <th>Qty</th>
+                                <th>Entry ₹</th>
+                                <th>LTP ₹</th>
+                                <th>Stop Loss ₹</th>
+                                <th>Trailing SL ₹</th>
+                                <th>Target ₹</th>
+                                <th>Live P&amp;L</th>
+                                <th>Action</th>
+                            </tr>
+                        </thead>
+                        <tbody id="algo-positions-tbody">
+                            <tr><td colspan="12" class="empty">No active positions open. Start bot to scan for auto entries.</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- 6. LIVE ACTIVITY TERMINAL CONSOLE -->
+            <div class="panel algo-terminal-panel">
+                <div class="algo-terminal-header">
+                    <div class="algo-term-title-box">
+                        <span class="algo-term-dot green"></span>
+                        <span class="algo-term-dot yellow"></span>
+                        <span class="algo-term-dot red"></span>
+                        <span class="algo-term-title">💻 Live Algorithmic Execution Terminal (Auto-Pilot Stream)</span>
+                    </div>
+                    <div class="algo-term-controls">
+                        <div class="algo-term-filters">
+                            <button class="algo-term-btn active" data-filter="ALL" onclick="filterAlgoLogs('ALL')">All</button>
+                            <button class="algo-term-btn" data-filter="SIGNAL" onclick="filterAlgoLogs('SIGNAL')">Signals</button>
+                            <button class="algo-term-btn" data-filter="ORDER" onclick="filterAlgoLogs('ORDER')">Auto Orders</button>
+                            <button class="algo-term-btn" data-filter="TRAIL" onclick="filterAlgoLogs('TRAIL')">Trailing SL</button>
+                            <button class="algo-term-btn" data-filter="EXIT" onclick="filterAlgoLogs('EXIT')">Exits</button>
+                            <button class="algo-term-btn" data-filter="ALERT" onclick="filterAlgoLogs('ALERT')">RMS / Alerts</button>
+                        </div>
+                        <label class="algo-autoscroll-label">
+                            <input type="checkbox" id="algo-autoscroll-chk" checked> Auto-Scroll
+                        </label>
+                        <button class="btn btn-sm btn-grey" onclick="clearAlgoLogs()">Clear</button>
+                    </div>
+                </div>
+
+                <div class="algo-terminal-body" id="algo-terminal-body">
+                    <!-- Logs stream dynamically -->
+                    <div class="term-line info"><span class="term-time">[00:00:00]</span> <span class="term-tag info">[INFO]</span> Initializing Algo Trade Terminal...</div>
+                </div>
+            </div>
+
+            <!-- 7. COMPLETED TRADES HISTORY -->
+            <div class="panel algo-trades-panel">
+                <div class="panel-header" style="display:flex;justify-content:space-between;align-items:center">
+                    <div style="display:flex;align-items:center;gap:10px">
+                        <h3>📑 Completed Algo Trades</h3>
+                        <span class="badge-mini blue" id="algo-closed-trades-count">0 Closed</span>
+                    </div>
+                    <button class="btn btn-sm btn-grey" onclick="fetchAlgoTrades()">🔄 Refresh Trades</button>
+                </div>
+                <div class="table-wrap">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Symbol</th>
+                                <th>Strategy</th>
+                                <th>Side</th>
+                                <th>Product</th>
+                                <th>Qty</th>
+                                <th>Entry ₹</th>
+                                <th>Exit ₹</th>
+                                <th>P&amp;L ₹</th>
+                                <th>P&amp;L %</th>
+                                <th>Duration</th>
+                                <th>Exit Reason</th>
+                                <th>Time</th>
+                            </tr>
+                        </thead>
+                        <tbody id="algo-trades-tbody">
+                            <tr><td colspan="12" class="empty">No completed trades yet today.</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </section>
+
+        <!-- ══════════════════════════════════════════════════
+             MODALS: STRATEGY CONFIG & KILL SWITCH CONFIRMATION
+        ═══════════════════════════════════════════════════ -->
+        <!-- Strategy Config Modal -->
+        <div id="algo-strat-modal" class="sc-modal" style="display:none">
+            <div class="sc-modal-box" style="max-width:550px">
+                <div class="sc-modal-header">
+                    <div style="display:flex;align-items:center;gap:10px">
+                        <span id="algo-modal-strat-icon" style="font-size:24px">⚙️</span>
+                        <div>
+                            <h3 id="algo-modal-strat-title" style="margin:0;font-size:16px">Strategy Settings</h3>
+                            <div id="algo-modal-strat-sub" style="font-size:11px;color:var(--text3)">Configure execution parameters for auto buy/sell</div>
+                        </div>
+                    </div>
+                    <button onclick="closeAlgoStratModal()" class="sc-modal-close">✕</button>
+                </div>
+                <div class="sc-modal-body" style="padding:16px">
+                    <input type="hidden" id="algo-modal-strat-id">
+                    
+                    <div class="algo-modal-form-grid">
+                        <div class="algo-modal-field">
+                            <label>Strategy Enabled for Auto Trading?</label>
+                            <select id="algo-modal-enabled" class="ctrl-select">
+                                <option value="true">✅ Enabled (Auto Trade Active)</option>
+                                <option value="false">❌ Disabled (Paused)</option>
+                            </select>
+                        </div>
+
+                        <div class="algo-modal-field">
+                            <label>Timeframe (Candle Size)</label>
+                            <select id="algo-modal-timeframe" class="ctrl-select">
+                                <option value="1m">1 Minute (Ultra Fast)</option>
+                                <option value="3m">3 Minutes (Fast Reversal)</option>
+                                <option value="5m" selected>5 Minutes (Standard Intraday)</option>
+                                <option value="15m">15 Minutes (Trend Riding)</option>
+                            </select>
+                        </div>
+
+                        <div class="algo-modal-field">
+                            <label>Target Profit %</label>
+                            <input type="number" id="algo-modal-target-pct" class="ctrl-input" step="0.1" min="0.2" value="1.5">
+                            <small class="algo-field-hint">Auto profit booking price level (e.g. +1.5%)</small>
+                        </div>
+
+                        <div class="algo-modal-field">
+                            <label>Stop Loss %</label>
+                            <input type="number" id="algo-modal-sl-pct" class="ctrl-input" step="0.1" min="0.2" value="0.8">
+                            <small class="algo-field-hint">Auto loss cut price level (e.g. -0.8%)</small>
+                        </div>
+
+                        <div class="algo-modal-field">
+                            <label>Trailing SL Step %</label>
+                            <input type="number" id="algo-modal-trail-pct" class="ctrl-input" step="0.05" min="0.1" value="0.3">
+                            <small class="algo-field-hint">Moves SL up whenever price advances by this %</small>
+                        </div>
+
+                        <div class="algo-modal-field">
+                            <label>Capital Allocation per Trade (₹)</label>
+                            <input type="number" id="algo-modal-capital" class="ctrl-input" step="5000" min="5000" value="20000">
+                            <small class="algo-field-hint">With 5X leverage in MIS, effective buying power = 5X</small>
+                        </div>
+
+                        <div class="algo-modal-field">
+                            <label>Product Type</label>
+                            <select id="algo-modal-product" class="ctrl-select">
+                                <option value="MIS" selected>⚡ Intraday MIS (5X Margin Leverage)</option>
+                                <option value="CNC">📦 Delivery CNC (1X Full Cash)</option>
+                            </select>
+                        </div>
+
+                        <div class="algo-modal-field">
+                            <label>Trade Direction / Side</label>
+                            <select id="algo-modal-side" class="ctrl-select">
+                                <option value="BOTH" selected>Long &amp; Short (BUY &amp; SELL)</option>
+                                <option value="BUY_ONLY">Long Only (BUY Only)</option>
+                                <option value="SELL_ONLY">Short Only (SELL Only)</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:20px">
+                        <button class="btn btn-grey" onclick="closeAlgoStratModal()">Cancel</button>
+                        <button class="btn btn-blue" onclick="saveAlgoStratModal()">💾 Save &amp; Apply</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Emergency Kill Switch Confirmation Modal -->
+        <div id="algo-kill-modal" class="sc-modal" style="display:none">
+            <div class="sc-modal-box" style="max-width:450px;border-top:4px solid var(--red)">
+                <div class="sc-modal-header" style="background:#260505">
+                    <div style="display:flex;align-items:center;gap:10px">
+                        <span style="font-size:26px">🚨</span>
+                        <div>
+                            <h3 style="margin:0;color:#f87171">Emergency Kill Switch</h3>
+                            <div style="font-size:11px;color:#fca5a5">Panic Action: Square off all positions &amp; stop robot</div>
+                        </div>
+                    </div>
+                    <button onclick="closeKillModal()" class="sc-modal-close">✕</button>
+                </div>
+                <div class="sc-modal-body" style="padding:20px;text-align:center">
+                    <p style="font-size:14px;color:var(--text);margin-bottom:12px;line-height:1.6">
+                        Are you sure you want to trigger the <strong>EMERGENCY KILL SWITCH</strong>?
+                    </p>
+                    <div style="background:var(--bg3);border:1px solid var(--border);border-radius:8px;padding:12px;margin-bottom:20px;text-align:left;font-size:12px;color:var(--text2)">
+                        • Bot state will be switched to <strong>STOPPED</strong>.<br>
+                        • ALL open active positions will be <strong>IMMEDIATELY SQUARED OFF</strong> at current market price.<br>
+                        • Any pending algo orders will be canceled.
+                    </div>
+                    <div style="display:flex;justify-content:center;gap:12px">
+                        <button class="btn btn-grey" onclick="closeKillModal()">Cancel (Stay Active)</button>
+                        <button class="btn btn-danger-kill" style="padding:10px 20px" onclick="executeKillSwitch()">
+                            🚨 YES, SQUARE OFF ALL &amp; HALT
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
     </main><!-- /content-area -->
 
     <!-- STATUS BAR -->
@@ -1292,5 +1680,6 @@
 <script src="/static/js/trade.js?v=2"></script>
 <script src="/static/js/paper.js?v=2"></script>
 <script src="/static/js/reversals.js?v=2"></script>
+<script src="/static/js/algotrade.js?v=1"></script>
 </body>
 </html>

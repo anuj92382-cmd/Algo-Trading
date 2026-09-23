@@ -70,10 +70,12 @@ function showPage(name) {
         sectors:   '🌡️ Sector Heatmap',
         reversals: '🔄 Open Reversals Screener',
         trade:     '💹 Trade - Buy / Sell',
+        algotrade: '⚡ Algo Trade - Autonomous Auto-Pilot',
     };
     setText('pageTitle', titles[name] || name);
 
     // Lazy load
+    if (name === 'algotrade') initAlgoTradePage();
     if (name === 'gainers' || name === 'losers') loadGainersLosers();
     if (name === 'positions') fetchPositions();
     if (name === 'trades')    fetchTrades();
