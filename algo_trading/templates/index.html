@@ -1343,73 +1343,173 @@
             <!-- 3. RISK MANAGEMENT & UNIVERSE BAR -->
             <div class="panel algo-rms-panel">
                 <div class="algo-rms-header">
-                    <div class="algo-rms-title">
-                        🛡️ <strong>Risk Management &amp; Circuit Breakers (RMS)</strong>
-                        <span class="algo-rms-sub">Automatic capital protection and intraday cutoff rules</span>
+                    <div class="algo-rms-title-group">
+                        <div class="algo-rms-title">
+                            🛡️ <strong>Risk Management &amp; Circuit Breakers (RMS)</strong>
+                        </div>
+                        <span class="algo-rms-sub">Autonomous Capital Shield • Daily Loss Cutoff • Profit Lock • Intraday Timing Guard</span>
                     </div>
-                    <div id="algo-circuit-breaker-alert" class="algo-cb-alert" style="display:none">
-                        ⚠️ <strong>CIRCUIT BREAKER TRIGGERED:</strong> <span id="algo-cb-reason">--</span>
-                        <button class="btn btn-sm btn-yellow" onclick="resetCircuitBreaker()">Reset Lock</button>
+
+                    <div class="algo-rms-header-actions">
+                        <!-- Normal Safe State Badge -->
+                        <span class="badge-pill green" id="algo-cb-status-badge">
+                            🛡️ RMS: ARMED &amp; PROTECTED
+                        </span>
+
+                        <!-- Triggered Alert Badge (Shown only if circuit breaker tripped) -->
+                        <div id="algo-circuit-breaker-alert" class="algo-cb-alert" style="display:none">
+                            ⚠️ <strong>CIRCUIT BREAKER:</strong> <span id="algo-cb-reason">Daily Loss Breached</span>
+                            <button class="btn btn-xs btn-yellow" onclick="resetCircuitBreaker()">Reset Lock</button>
+                        </div>
+
+                        <!-- Top Save Action Button -->
+                        <button class="btn btn-sm btn-blue rms-save-btn" onclick="saveAlgoRMS()" title="Save updated RMS rules">
+                            <span class="btn-icon">💾</span> Save RMS Rules
+                        </button>
                     </div>
                 </div>
 
-                <div class="algo-rms-grid">
-                    <div class="algo-rms-field">
-                        <label>Universe (Scan List)</label>
-                        <select id="algo-universe-select" class="ctrl-select" onchange="updateAlgoRMS()">
-                            <option value="nifty50" selected>🔵 Nifty 50 (Bluechips)</option>
-                            <option value="fno">🎯 Nifty F&amp;O (~185 Liquid)</option>
-                            <option value="nifty100">📈 Nifty 100</option>
-                            <option value="watchlist">⭐ My Watchlist</option>
-                        </select>
-                    </div>
+                <!-- 3 USER-FRIENDLY RMS CONTROL CARDS -->
+                <div class="algo-rms-card-container">
 
-                    <div class="algo-rms-field">
-                        <label>Max Daily Loss Limit (₹)</label>
-                        <input type="number" id="algo-rms-max-loss" class="ctrl-input" value="5000" step="500" min="500">
-                    </div>
+                    <!-- CARD 1: 🛑 CAPITAL SHIELD (Loss & Profit Limits) -->
+                    <div class="algo-rms-card rms-card-capital">
+                        <div class="rms-card-header">
+                            <span class="rms-card-icon">🛑</span>
+                            <div>
+                                <div class="rms-card-title">Daily Capital Protection</div>
+                                <div class="rms-card-subtitle">Automated hard limits on daily P&amp;L</div>
+                            </div>
+                        </div>
 
-                    <div class="algo-rms-field">
-                        <label>Max Daily Profit Target (₹)</label>
-                        <input type="number" id="algo-rms-max-profit" class="ctrl-input" value="15000" step="1000" min="1000">
-                    </div>
+                        <div class="rms-card-body">
+                            <div class="rms-input-group">
+                                <label for="algo-rms-max-loss">
+                                    <span class="rms-label-tag red">MAX DAILY LOSS</span>
+                                    <span class="rms-hint">Halt bot if loss hits ₹</span>
+                                </label>
+                                <div class="rms-input-wrapper loss-border">
+                                    <span class="rms-currency red">₹</span>
+                                    <input type="number" id="algo-rms-max-loss" class="rms-styled-input red-text" value="5000" step="500" min="500" placeholder="5000">
+                                </div>
+                            </div>
 
-                    <div class="algo-rms-field">
-                        <label>Max Open Positions</label>
-                        <select id="algo-rms-max-positions" class="ctrl-select">
-                            <option value="1">1 Stock Max</option>
-                            <option value="2">2 Stocks Max</option>
-                            <option value="3">3 Stocks Max</option>
-                            <option value="4" selected>4 Stocks Max</option>
-                            <option value="5">5 Stocks Max</option>
-                            <option value="8">8 Stocks Max</option>
-                        </select>
-                    </div>
-
-                    <div class="algo-rms-field">
-                        <label>Min Setup Win Rate %</label>
-                        <select id="algo-rms-min-winrate" class="ctrl-select">
-                            <option value="50">50% Minimum</option>
-                            <option value="55">55% Minimum</option>
-                            <option value="60" selected>🔥 60% Minimum (Strict Quality)</option>
-                            <option value="65">65% Minimum (High Confidence)</option>
-                            <option value="70">70% Minimum (Elite Only)</option>
-                        </select>
-                    </div>
-
-                    <div class="algo-rms-field">
-                        <label>Timing Rules (IST)</label>
-                        <div class="algo-timing-pill">
-                            <span>Entries: <strong>09:20 - 14:45</strong></span>
-                            <span class="sep">|</span>
-                            <span>Auto Square-off: <strong class="red">15:15 PM</strong></span>
+                            <div class="rms-input-group">
+                                <label for="algo-rms-max-profit">
+                                    <span class="rms-label-tag green">MAX DAILY PROFIT</span>
+                                    <span class="rms-hint">Lock gains &amp; halt bot at ₹</span>
+                                </label>
+                                <div class="rms-input-wrapper profit-border">
+                                    <span class="rms-currency green">₹</span>
+                                    <input type="number" id="algo-rms-max-profit" class="rms-styled-input green-text" value="15000" step="1000" min="1000" placeholder="15000">
+                                </div>
+                            </div>
                         </div>
                     </div>
 
-                    <div class="algo-rms-field algo-rms-action">
-                        <label>&nbsp;</label>
-                        <button class="btn btn-blue" onclick="saveAlgoRMS()" style="width:100%">💾 Save RMS Rules</button>
+                    <!-- CARD 2: 🎯 PORTFOLIO & QUALITY GATING -->
+                    <div class="algo-rms-card rms-card-execution">
+                        <div class="rms-card-header">
+                            <span class="rms-card-icon">🎯</span>
+                            <div>
+                                <div class="rms-card-title">Portfolio &amp; Quality Filter</div>
+                                <div class="rms-card-subtitle">Scanner basket &amp; setup probability</div>
+                            </div>
+                        </div>
+
+                        <div class="rms-card-body">
+                            <div class="rms-input-group">
+                                <label for="algo-universe-select">
+                                    <span class="rms-label-tag blue">SCAN UNIVERSE</span>
+                                    <span class="rms-hint">Stock list scanned for signals</span>
+                                </label>
+                                <select id="algo-universe-select" class="rms-styled-select" onchange="updateAlgoRMS()">
+                                    <option value="nifty50" selected>🔵 Nifty 50 (Bluechips)</option>
+                                    <option value="fno">🎯 Nifty F&amp;O (~185 Liquid Stocks)</option>
+                                    <option value="nifty100">📈 Nifty 100</option>
+                                    <option value="watchlist">⭐ My Watchlist</option>
+                                </select>
+                            </div>
+
+                            <div class="rms-row-2col">
+                                <div class="rms-input-group">
+                                    <label for="algo-rms-max-positions">
+                                        <span class="rms-label-tag yellow">MAX POSITIONS</span>
+                                        <span class="rms-hint">Concurrent open</span>
+                                    </label>
+                                    <select id="algo-rms-max-positions" class="rms-styled-select">
+                                        <option value="1">1 Stock Max</option>
+                                        <option value="2">2 Stocks Max</option>
+                                        <option value="3">3 Stocks Max</option>
+                                        <option value="4" selected>4 Stocks Max</option>
+                                        <option value="5">5 Stocks Max</option>
+                                        <option value="8">8 Stocks Max</option>
+                                    </select>
+                                </div>
+
+                                <div class="rms-input-group">
+                                    <label for="algo-rms-min-winrate">
+                                        <span class="rms-label-tag cyan">MIN WIN RATE %</span>
+                                        <span class="rms-hint">Quality gate</span>
+                                    </label>
+                                    <select id="algo-rms-min-winrate" class="rms-styled-select">
+                                        <option value="50">50% Min</option>
+                                        <option value="55">55% Min</option>
+                                        <option value="60" selected>🔥 60% (Strict)</option>
+                                        <option value="65">65% (High Conf)</option>
+                                        <option value="70">70% (Elite Only)</option>
+                                    </select>
+                                </div>
+                            </div>
+                        </div>
                     </div>
+
+                    <!-- CARD 3: ⏱️ INTRADAY MARKET TIMING -->
+                    <div class="algo-rms-card rms-card-timing">
+                        <div class="rms-card-header">
+                            <span class="rms-card-icon">⏱️</span>
+                            <div>
+                                <div class="rms-card-title">Intraday Market Timing</div>
+                                <div class="rms-card-subtitle">NSE trading session boundaries (IST)</div>
+                            </div>
+                        </div>
+
+                        <div class="rms-card-body timing-body">
+                            <div class="rms-timing-item">
+                                <div class="rms-timing-left">
+                                    <span class="rms-timing-dot green"></span>
+                                    <div>
+                                        <div class="rms-timing-lbl">Fresh Entry Window</div>
+                                        <div class="rms-timing-val">09:20 AM – 02:45 PM</div>
+                                    </div>
+                                </div>
+                                <span class="rms-timing-badge active">Auto Scanning</span>
+                            </div>
+
+                            <div class="rms-timing-item">
+                                <div class="rms-timing-left">
+                                    <span class="rms-timing-dot yellow"></span>
+                                    <div>
+                                        <div class="rms-timing-lbl">New Entry Cutoff</div>
+                                        <div class="rms-timing-val">02:45 PM IST</div>
+                                    </div>
+                                </div>
+                                <span class="rms-timing-badge warning">Entries Paused</span>
+                            </div>
+
+                            <div class="rms-timing-item">
+                                <div class="rms-timing-left">
+                                    <span class="rms-timing-dot red"></span>
+                                    <div>
+                                        <div class="rms-timing-lbl">Auto Square-Off (MIS)</div>
+                                        <div class="rms-timing-val">03:15 PM IST</div>
+                                    </div>
+                                </div>
+                                <span class="rms-timing-badge danger">100% Closed</span>
+                            </div>
+                        </div>
+                    </div>
+
                 </div>
             </div>
 
@@ -1732,6 +1832,6 @@
 <script src="/static/js/trade.js?v=2"></script>
 <script src="/static/js/paper.js?v=2"></script>
 <script src="/static/js/reversals.js?v=2"></script>
-<script src="/static/js/algotrade.js?v=4"></script>
+<script src="/static/js/algotrade.js?v=5"></script>
 </body>
 </html>

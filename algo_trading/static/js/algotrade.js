@@ -151,15 +151,18 @@ function renderAlgoStatus(data) {
     setText('algo-kpi-total-trades', `${stats.total_trades || 0}`);
     setText('algo-kpi-signals-count', `${stats.signals_today || 0}`);
 
-    // Circuit Breaker Alert
+    // Circuit Breaker Alert & Status Badge
     const cbAlert = document.getElementById('algo-circuit-breaker-alert');
+    const cbBadge = document.getElementById('algo-cb-status-badge');
     if (data.circuit_breaker_hit) {
         if (cbAlert) {
             cbAlert.style.display = 'flex';
             setText('algo-cb-reason', data.circuit_breaker_reason || 'Daily Loss Limit Breached');
         }
+        if (cbBadge) cbBadge.style.display = 'none';
     } else {
         if (cbAlert) cbAlert.style.display = 'none';
+        if (cbBadge) cbBadge.style.display = 'inline-flex';
     }
 }
 
@@ -545,6 +548,27 @@ async function saveAlgoRMS() {
 
 function updateAlgoRMS() {
     saveAlgoRMS();
+}
+
+async function resetCircuitBreaker() {
+    try {
+        const res = await fetch('/api/algo/config', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                risk_config: { circuit_breaker_hit: false, circuit_breaker_reason: '' }
+            })
+        });
+        const data = await res.json();
+        if (data.success) {
+            showToast('🛡️ Circuit Breaker Lock Reset!', 'success');
+            loadAlgoStatus();
+        } else {
+            showToast(data.error || 'Failed to reset circuit breaker', 'error');
+        }
+    } catch (e) {
+        showToast('Error resetting circuit breaker lock', 'error');
+    }
 }
 
 // ─── 7. ACTIVE ALGO POSITIONS TABLE ───────────────────────────

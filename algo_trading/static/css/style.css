@@ -3229,10 +3229,13 @@ tr.row-crossed-break:hover {
 .algo-kpi-val.green { color: #4ade80; }
 .algo-kpi-val.red   { color: #f87171; }
 
-/* 3. RMS Panel */
+/* 3. RMS Panel - User-Friendly 3-Card Layout */
 .algo-rms-panel {
-    margin-bottom: 16px;
-    padding: 14px 18px;
+    margin-bottom: 20px;
+    padding: 16px 20px;
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
 }
 
 .algo-rms-header {
@@ -3240,62 +3243,338 @@ tr.row-crossed-break:hover {
     justify-content: space-between;
     align-items: center;
     flex-wrap: wrap;
-    gap: 10px;
-    margin-bottom: 12px;
+    gap: 12px;
+    margin-bottom: 14px;
+    padding-bottom: 12px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.algo-rms-title-group {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
 }
 
 .algo-rms-title strong {
     color: #fff;
-    font-size: 13px;
+    font-size: 14.5px;
+    font-weight: 700;
 }
 
 .algo-rms-sub {
-    font-size: 11px;
+    font-size: 11.5px;
     color: var(--text3);
-    margin-left: 8px;
+}
+
+.algo-rms-header-actions {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.rms-save-btn {
+    padding: 6px 14px;
+    font-weight: 600;
+    font-size: 12px;
+    border-radius: 6px;
+    box-shadow: 0 2px 6px rgba(59, 130, 246, 0.25);
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    transition: all 0.2s ease;
+}
+
+.rms-save-btn:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 4px 10px rgba(59, 130, 246, 0.35);
 }
 
 .algo-cb-alert {
     background: rgba(239, 68, 68, 0.15);
     border: 1px solid #ef4444;
     border-radius: 6px;
-    padding: 6px 12px;
+    padding: 5px 10px;
     display: flex;
     align-items: center;
     gap: 8px;
-    font-size: 12px;
+    font-size: 11.5px;
     color: #fca5a5;
+    animation: pulseRed 1.8s infinite;
 }
 
-.algo-rms-grid {
+/* 3-Card Container */
+.algo-rms-card-container {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
-    gap: 12px;
-    align-items: flex-end;
+    grid-template-columns: repeat(auto-fit, minmax(310px, 1fr));
+    gap: 14px;
 }
 
-.algo-rms-field {
+.algo-rms-card {
+    background: #0d1728;
+    border: 1px solid #1a2f4c;
+    border-radius: 9px;
+    padding: 15px 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.algo-rms-card:hover {
+    border-color: #274773;
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.25);
+}
+
+.rms-card-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.rms-card-icon {
+    font-size: 19px;
+    line-height: 1;
+}
+
+.rms-card-title {
+    font-size: 13.5px;
+    font-weight: 700;
+    color: #f1f5f9;
+}
+
+.rms-card-subtitle {
+    font-size: 11px;
+    color: #64748b;
+}
+
+.rms-card-body {
+    display: flex;
+    flex-direction: column;
+    gap: 11px;
+}
+
+.rms-row-2col {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+}
+
+.rms-input-group {
     display: flex;
     flex-direction: column;
     gap: 5px;
 }
 
-.algo-rms-field label {
-    font-size: 11px;
-    color: var(--text2);
-    font-weight: 600;
-}
-
-.algo-timing-pill {
-    background: var(--bg);
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    padding: 7px 10px;
-    font-size: 11px;
+.rms-input-group label {
     display: flex;
     align-items: center;
-    gap: 6px;
-    white-space: nowrap;
+    justify-content: space-between;
+    font-size: 11px;
+    cursor: pointer;
+}
+
+.rms-label-tag {
+    font-size: 9.5px;
+    font-weight: 700;
+    padding: 2px 6px;
+    border-radius: 4px;
+    letter-spacing: 0.5px;
+}
+
+.rms-label-tag.red {
+    background: rgba(239, 68, 68, 0.15);
+    color: #f87171;
+    border: 1px solid rgba(239, 68, 68, 0.35);
+}
+
+.rms-label-tag.green {
+    background: rgba(34, 197, 94, 0.15);
+    color: #4ade80;
+    border: 1px solid rgba(34, 197, 94, 0.35);
+}
+
+.rms-label-tag.blue {
+    background: rgba(56, 189, 248, 0.15);
+    color: #38bdf8;
+    border: 1px solid rgba(56, 189, 248, 0.35);
+}
+
+.rms-label-tag.yellow {
+    background: rgba(234, 179, 8, 0.15);
+    color: #facc15;
+    border: 1px solid rgba(234, 179, 8, 0.35);
+}
+
+.rms-label-tag.cyan {
+    background: rgba(6, 182, 212, 0.15);
+    color: #22d3ee;
+    border: 1px solid rgba(6, 182, 212, 0.35);
+}
+
+.rms-hint {
+    color: #64748b;
+    font-size: 10.5px;
+}
+
+.rms-input-wrapper {
+    display: flex;
+    align-items: center;
+    background: #070e1a;
+    border: 1px solid #1a2f4c;
+    border-radius: 6px;
+    overflow: hidden;
+    transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.rms-input-wrapper.loss-border:focus-within {
+    border-color: #ef4444;
+    box-shadow: 0 0 8px rgba(239, 68, 68, 0.28);
+}
+
+.rms-input-wrapper.profit-border:focus-within {
+    border-color: #22c55e;
+    box-shadow: 0 0 8px rgba(34, 197, 94, 0.28);
+}
+
+.rms-currency {
+    padding: 6px 11px;
+    font-weight: 700;
+    font-size: 13.5px;
+    user-select: none;
+    border-right: 1px solid #1a2f4c;
+}
+
+.rms-currency.red {
+    color: #f87171;
+    background: rgba(239, 68, 68, 0.08);
+}
+
+.rms-currency.green {
+    color: #4ade80;
+    background: rgba(34, 197, 94, 0.08);
+}
+
+.rms-styled-input {
+    flex: 1;
+    background: transparent;
+    border: none;
+    outline: none;
+    padding: 7px 11px;
+    font-size: 13px;
+    font-weight: 700;
+    font-family: 'JetBrains Mono', Consolas, monospace;
+}
+
+.rms-styled-input.red-text {
+    color: #fca5a5;
+}
+
+.rms-styled-input.green-text {
+    color: #86efac;
+}
+
+.rms-styled-select {
+    background: #070e1a;
+    border: 1px solid #1a2f4c;
+    color: #f8fafc;
+    border-radius: 6px;
+    padding: 7px 11px;
+    font-size: 12px;
+    outline: none;
+    transition: border-color 0.2s, box-shadow 0.2s;
+    width: 100%;
+}
+
+.rms-styled-select:focus {
+    border-color: #38bdf8;
+    box-shadow: 0 0 8px rgba(56, 189, 248, 0.25);
+}
+
+/* Timing Card Body */
+.timing-body {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    justify-content: center;
+    height: 100%;
+}
+
+.rms-timing-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    background: #070e1a;
+    border: 1px solid #16263e;
+    border-radius: 6px;
+    padding: 7px 11px;
+}
+
+.rms-timing-left {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+}
+
+.rms-timing-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    display: inline-block;
+}
+
+.rms-timing-dot.green {
+    background: #22c55e;
+    box-shadow: 0 0 6px #22c55e;
+}
+
+.rms-timing-dot.yellow {
+    background: #eab308;
+    box-shadow: 0 0 6px #eab308;
+}
+
+.rms-timing-dot.red {
+    background: #ef4444;
+    box-shadow: 0 0 6px #ef4444;
+}
+
+.rms-timing-lbl {
+    font-size: 10.5px;
+    color: #94a3b8;
+    font-weight: 500;
+}
+
+.rms-timing-val {
+    font-size: 11.5px;
+    color: #f1f5f9;
+    font-weight: 700;
+}
+
+.rms-timing-badge {
+    font-size: 9.5px;
+    font-weight: 700;
+    padding: 2px 7px;
+    border-radius: 4px;
+}
+
+.rms-timing-badge.active {
+    background: rgba(34, 197, 94, 0.15);
+    color: #4ade80;
+    border: 1px solid rgba(34, 197, 94, 0.3);
+}
+
+.rms-timing-badge.warning {
+    background: rgba(234, 179, 8, 0.15);
+    color: #facc15;
+    border: 1px solid rgba(234, 179, 8, 0.3);
+}
+
+.rms-timing-badge.danger {
+    background: rgba(239, 68, 68, 0.15);
+    color: #f87171;
+    border: 1px solid rgba(239, 68, 68, 0.3);
 }
 
 /* 4. Quantitative Strategies Grid */
