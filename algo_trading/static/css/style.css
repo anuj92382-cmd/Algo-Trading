@@ -3635,19 +3635,6 @@ tr.row-crossed-break:hover {
     margin-top: 2px;
 }
 
-/* 🧪 Demo Simulation Button */
-.btn-purple {
-    background: linear-gradient(135deg, #7c3aed, #9333ea);
-    color: #fff;
-    border: 1px solid rgba(168, 85, 247, 0.4);
-    box-shadow: 0 2px 8px rgba(147, 51, 234, 0.25);
-}
-.btn-purple:hover {
-    background: linear-gradient(135deg, #6d28d9, #7e22ce);
-    box-shadow: 0 4px 14px rgba(147, 51, 234, 0.4);
-    transform: translateY(-1px);
-}
-
 /* 📈 Live Intraday Equity Curve Chart Panel */
 .algo-equity-panel {
     background: var(--bg2);

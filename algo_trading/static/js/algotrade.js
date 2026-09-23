@@ -209,26 +209,6 @@ async function triggerAlgoScanNow() {
     }
 }
 
-async function triggerDemoSimulation() {
-    try {
-        showToast('🧪 Launching 24/7 Off-Market Live Simulation...', 'info');
-        const res = await fetch('/api/algo/simulate', { method: 'POST' });
-        const data = await res.json();
-        if (data.success) {
-            showToast(data.message || 'Demo simulation started! Check console & positions.', 'success');
-            setTimeout(() => {
-                fetchAlgoLogs();
-                fetchAlgoPositions();
-                loadAlgoEquityCurve();
-            }, 800);
-        } else {
-            showToast(data.error || 'Failed to start demo simulation', 'error');
-        }
-    } catch (e) {
-        showToast('Error triggering demo simulation', 'error');
-    }
-}
-
 
 // ─── 3. EMERGENCY KILL SWITCH ─────────────────────────────────
 function confirmKillSwitch() {
