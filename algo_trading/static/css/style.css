@@ -3226,6 +3226,8 @@ tr.row-crossed-break:hover {
     color: var(--text);
     font-feature-settings: "tnum";
 }
+.algo-kpi-val.green { color: #4ade80; }
+.algo-kpi-val.red   { color: #f87171; }
 
 /* 3. RMS Panel */
 .algo-rms-panel {

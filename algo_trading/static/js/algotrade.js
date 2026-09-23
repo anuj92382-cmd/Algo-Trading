@@ -116,6 +116,13 @@ function renderAlgoStatus(data) {
     renderPnlElem('algo-kpi-realized-pnl', stats.realized_pnl || 0);
     renderPnlElem('algo-kpi-unrealized-pnl', stats.unrealized_pnl || 0);
 
+    const chargesVal = parseFloat(stats.today_charges !== undefined ? stats.today_charges : (stats.total_charges || 0)) || 0;
+    const chargesElem = document.getElementById('algo-kpi-charges');
+    if (chargesElem) {
+        chargesElem.innerText = (chargesVal > 0 ? '-₹' : '₹') + Math.abs(chargesVal).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        chargesElem.className = 'algo-kpi-val ' + (chargesVal > 0 ? 'red' : '');
+    }
+
     const activeCount = data.open_positions_count || 0;
     const maxPos = (data.risk_config && data.risk_config.max_open_positions) || 4;
     setText('algo-kpi-active-pos', `${activeCount} / ${maxPos}`);
@@ -561,6 +568,17 @@ function renderAlgoPositionsTable(positions) {
             ? `<span class="badge-mini risk-free" title="Target 1 hit! 50% profit booked &amp; SL moved to Cost (Risk-Free)">🛡️ RISK-FREE (T1 HIT)</span>`
             : `<span class="badge-mini blue">MONITORING</span>`;
 
+        const grossPnl = p.gross_pnl !== undefined ? p.gross_pnl : pnl;
+        const grossColor = grossPnl >= 0 ? 'green' : 'red';
+        const grossSign = grossPnl >= 0 ? '+' : '';
+        const charges = p.charges || 0;
+
+        let chargesTip = `Est. Round-Trip Charges: ₹${charges.toFixed(2)}`;
+        if (p.charges_breakdown && typeof p.charges_breakdown === 'object') {
+            const parts = Object.entries(p.charges_breakdown).map(([k, v]) => `${k}: ${v}`);
+            chargesTip = `Est. Round-Trip Charges: ₹${charges.toFixed(2)} (${parts.join(' | ')})`;
+        }
+
         return `
             <tr>
                 <td>
@@ -579,8 +597,12 @@ function renderAlgoPositionsTable(positions) {
                 <td class="green">₹${t1.toFixed(2)}</td>
                 <td class="green">₹${t2.toFixed(2)}</td>
                 <td class="${pnlColor}">
-                    <strong>${pnlSign}₹${Math.abs(pnl).toFixed(2)}</strong>
-                    <small>(${pnlSign}${pnlPct.toFixed(2)}%)</small>
+                    <div><strong>${pnlSign}₹${Math.abs(pnl).toFixed(2)}</strong> <small>(${pnlSign}${pnlPct.toFixed(2)}%)</small></div>
+                    <div style="font-size:10px;opacity:0.85;margin-top:2px;white-space:nowrap;" title="${escapeHtml(chargesTip)}">
+                        Gross: <span class="${grossColor}">${grossSign}₹${Math.abs(grossPnl).toFixed(2)}</span>
+                        <span style="color:var(--text3)"> | </span>
+                        Chg: <span class="red" style="text-decoration:underline dotted;cursor:help;">-₹${charges.toFixed(2)}</span>
+                    </div>
                 </td>
                 <td>${statusBadge}</td>
                 <td>
@@ -720,7 +742,7 @@ function renderAlgoTradesTable(trades) {
     if (!tbody) return;
 
     if (!trades || trades.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="12" class="empty">No completed trades yet today.</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="14" class="empty">No completed trades yet today.</td></tr>';
         if (badge) badge.innerText = '0 Closed';
         return;
     }
@@ -732,6 +754,18 @@ function renderAlgoTradesTable(trades) {
         const pnlPct = t.pnl_pct || 0;
         const pnlColor = pnl >= 0 ? 'green' : 'red';
         const pnlSign = pnl >= 0 ? '+' : '';
+
+        const grossPnl = t.gross_pnl !== undefined ? t.gross_pnl : pnl;
+        const grossColor = grossPnl >= 0 ? 'green' : 'red';
+        const grossSign = grossPnl >= 0 ? '+' : '';
+
+        const charges = t.charges || 0;
+        let chargesTip = `Total Charges: ₹${charges.toFixed(2)}`;
+        if (t.charges_breakdown && typeof t.charges_breakdown === 'object') {
+            const parts = Object.entries(t.charges_breakdown).map(([k, v]) => `${k}: ${v}`);
+            chargesTip = parts.join(' | ');
+        }
+
         const tvUrl = `https://www.tradingview.com/chart/?symbol=NSE:${encodeURIComponent(t.symbol)}`;
 
         let reasonBadge = 'badge-mini grey';
@@ -756,6 +790,10 @@ function renderAlgoTradesTable(trades) {
                 <td>${t.quantity}</td>
                 <td>₹${(t.entry_price || 0).toFixed(2)}</td>
                 <td>₹${(t.exit_price || 0).toFixed(2)}</td>
+                <td class="${grossColor}">${grossSign}₹${Math.abs(grossPnl).toFixed(2)}</td>
+                <td>
+                    <span class="badge-mini red" title="${escapeHtml(chargesTip)}" style="cursor:help;">-₹${charges.toFixed(2)}</span>
+                </td>
                 <td class="${pnlColor}"><strong>${pnlSign}₹${Math.abs(pnl).toFixed(2)}</strong></td>
                 <td class="${pnlColor}">${pnlSign}${pnlPct.toFixed(2)}%</td>
                 <td>${t.duration || '--'}</td>

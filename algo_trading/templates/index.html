@@ -1314,6 +1314,10 @@
                         <span class="algo-kpi-val" id="algo-kpi-net-pnl">₹0.00</span>
                     </div>
                     <div class="algo-kpi-item">
+                        <span class="algo-kpi-lbl">Brokerage &amp; Taxes</span>
+                        <span class="algo-kpi-val red" id="algo-kpi-charges">₹0.00</span>
+                    </div>
+                    <div class="algo-kpi-item">
                         <span class="algo-kpi-lbl">Realized P&amp;L</span>
                         <span class="algo-kpi-val" id="algo-kpi-realized-pnl">₹0.00</span>
                     </div>
@@ -1441,7 +1445,7 @@
                                 <th>Trailing SL ₹</th>
                                 <th>Target 1 ₹ (50%)</th>
                                 <th>Target 2 ₹ (Runner)</th>
-                                <th>Live P&amp;L</th>
+                                <th>Live P&amp;L (Net)</th>
                                 <th>Status</th>
                                 <th>Action</th>
                             </tr>
@@ -1530,15 +1534,17 @@
                                 <th>Qty</th>
                                 <th>Entry ₹</th>
                                 <th>Exit ₹</th>
-                                <th>P&amp;L ₹</th>
-                                <th>P&amp;L %</th>
+                                <th>Gross P&amp;L ₹</th>
+                                <th>Charges ₹</th>
+                                <th>Net P&amp;L ₹</th>
+                                <th>Net P&amp;L %</th>
                                 <th>Duration</th>
                                 <th>Exit Reason</th>
                                 <th>Time</th>
                             </tr>
                         </thead>
                         <tbody id="algo-trades-tbody">
-                            <tr><td colspan="12" class="empty">No completed trades yet today.</td></tr>
+                            <tr><td colspan="14" class="empty">No completed trades yet today.</td></tr>
                         </tbody>
                     </table>
                 </div>

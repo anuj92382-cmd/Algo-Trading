@@ -36,6 +36,85 @@ IST = pytz.timezone("Asia/Kolkata")
 STATE_FILE = Path(__file__).resolve().parent / "data" / "algo_state.json"
 
 
+def calculate_trade_charges(product: str, quantity: int, buy_price: float, sell_price: float) -> dict:
+    """
+    Computes exact statutory brokerage and taxes for Indian Equities on NSE (Zerodha standard schedule):
+    - Turnover: Buy Turnover + Sell Turnover
+    - Brokerage:
+        - MIS (Intraday): min(20.0, 0.0003 * turnover) per leg (buy leg + sell leg)
+        - CNC (Delivery): 0.0 (Zero brokerage)
+    - STT (Securities Transaction Tax):
+        - MIS: 0.025% on Sell turnover
+        - CNC: 0.1% on Total (Buy + Sell) turnover
+    - Exchange Transaction Charges:
+        - NSE: 0.00297% on Total turnover
+    - SEBI Turnover Charges:
+        - ₹10 per crore = 0.0001% on Total turnover
+    - Stamp Duty:
+        - 0.003% on Buy turnover
+    - GST:
+        - 18% on (Brokerage + Exchange Txn Charges + SEBI Charges)
+    - Total Charges: Sum of all above
+    """
+    qty = max(1, int(quantity))
+    b_price = max(0.01, float(buy_price))
+    s_price = max(0.01, float(sell_price))
+    prod = (product or "MIS").upper().strip()
+
+    buy_turnover = b_price * qty
+    sell_turnover = s_price * qty
+    total_turnover = buy_turnover + sell_turnover
+
+    # 1. Brokerage
+    if prod == "MIS":
+        buy_brokerage = min(20.0, 0.0003 * buy_turnover)
+        sell_brokerage = min(20.0, 0.0003 * sell_turnover)
+        brokerage = buy_brokerage + sell_brokerage
+    else:  # CNC
+        brokerage = 0.0
+
+    # 2. STT / CTT
+    if prod == "MIS":
+        stt = 0.00025 * sell_turnover
+    else:
+        stt = 0.001 * total_turnover
+
+    # 3. Exchange Transaction Charges (NSE Equity: 0.00297%)
+    exchange_txn = 0.0000297 * total_turnover
+
+    # 4. SEBI Turnover Charges (₹10/crore: 0.0001%)
+    sebi_charges = 0.000001 * total_turnover
+
+    # 5. Stamp Duty (Buy side only: 0.003% for intraday MIS, 0.015% for CNC)
+    if prod == "MIS":
+        stamp_duty = 0.00003 * buy_turnover
+    else:
+        stamp_duty = 0.00015 * buy_turnover
+
+    # 6. GST (18% on Brokerage + Exchange Txn + SEBI)
+    gst = 0.18 * (brokerage + exchange_txn + sebi_charges)
+
+    total_charges = brokerage + stt + exchange_txn + sebi_charges + stamp_duty + gst
+
+    return {
+        "brokerage": round(brokerage, 2),
+        "stt": round(stt, 2),
+        "exchange_txn": round(exchange_txn, 2),
+        "sebi": round(sebi_charges, 2),
+        "stamp_duty": round(stamp_duty, 2),
+        "gst": round(gst, 2),
+        "total_charges": round(total_charges, 2),
+        "breakdown": {
+            "Brokerage": f"₹{brokerage:.2f}",
+            "STT": f"₹{stt:.2f}",
+            "Exchange": f"₹{exchange_txn:.2f}",
+            "GST": f"₹{gst:.2f}",
+            "Stamp Duty": f"₹{stamp_duty:.2f}",
+            "SEBI": f"₹{sebi_charges:.2f}",
+        }
+    }
+
+
 class AlgoEngine:
     """
     Autonomous Multi-Strategy Algorithmic Trading Engine.
@@ -183,6 +262,8 @@ class AlgoEngine:
             "today_pnl": 0.0,
             "realized_pnl": 0.0,
             "unrealized_pnl": 0.0,
+            "gross_pnl": 0.0,
+            "total_charges": 0.0,
             "total_trades": 0,
             "winning_trades": 0,
             "losing_trades": 0,
@@ -255,6 +336,8 @@ class AlgoEngine:
                 self.closed_trades = data.get("closed_trades", [])
                 if "stats" in data:
                     self.stats.update(data["stats"])
+                self.stats.setdefault("gross_pnl", 0.0)
+                self.stats.setdefault("total_charges", 0.0)
                 logger.info("Loaded persisted algo state successfully.")
         except Exception as e:
             logger.debug(f"Could not load algo state: {e}")
@@ -486,21 +569,32 @@ class AlgoEngine:
 
             pos["current_price"] = ltp
 
-            # Calculate Live P&L
+            # Calculate Live P&L (Gross, Estimated Round-trip Charges, Net)
             qty = pos["quantity"]
+            product = pos.get("product", "MIS")
             if side == "BUY":
-                pnl = (ltp - entry_p) * qty
-                pnl_pct = ((ltp - entry_p) / entry_p) * 100.0
+                gross_pnl = (ltp - entry_p) * qty
+                charges_res = calculate_trade_charges(product, qty, buy_price=entry_p, sell_price=ltp)
                 if ltp > pos.get("highest_price", entry_p):
                     pos["highest_price"] = ltp
             else:  # SELL / SHORT
-                pnl = (entry_p - ltp) * qty
-                pnl_pct = ((entry_p - ltp) / entry_p) * 100.0
+                gross_pnl = (entry_p - ltp) * qty
+                charges_res = calculate_trade_charges(product, qty, buy_price=ltp, sell_price=entry_p)
                 if ltp < pos.get("lowest_price", entry_p):
                     pos["lowest_price"] = ltp
 
-            pos["pnl"] = round(pnl, 2)
-            pos["pnl_pct"] = round(pnl_pct, 2)
+            charges = charges_res["total_charges"]
+            net_pnl = gross_pnl - charges
+            denom = entry_p * qty
+            net_pnl_pct = (net_pnl / denom) * 100.0 if denom > 0 else 0.0
+
+            pos["gross_pnl"] = round(gross_pnl, 2)
+            pos["charges"] = round(charges, 2)
+            pos["charges_breakdown"] = charges_res["breakdown"]
+            pos["pnl"] = round(net_pnl, 2)
+            pos["pnl_pct"] = round(net_pnl_pct, 2)
+            pnl = pos["pnl"]
+            pnl_pct = pos["pnl_pct"]
 
             # DYNAMIC TRAILING STOP LOSS & MULTI-TARGET EXITS
             trail_pct = pos.get("trailing_step_pct", 0.3)
@@ -899,6 +993,8 @@ class AlgoEngine:
             "trailing_sl": sl_price,
             "trailing_step_pct": trail_pct,
             "margin_used": round(margin_req, 2),
+            "gross_pnl": 0.0,
+            "charges": 0.0,
             "pnl": 0.0,
             "pnl_pct": 0.0,
             "entry_time": datetime.now(IST).strftime("%H:%M:%S"),
@@ -930,16 +1026,21 @@ class AlgoEngine:
         product = pos["product"]
 
         if side == "BUY":
-            pnl = (exit_price - entry_p) * qty
-            pnl_pct = ((exit_price - entry_p) / entry_p) * 100.0
+            gross_pnl = (exit_price - entry_p) * qty
             exit_side = "SELL"
+            charges_res = calculate_trade_charges(product, qty, buy_price=entry_p, sell_price=exit_price)
         else:
-            pnl = (entry_p - exit_price) * qty
-            pnl_pct = ((entry_p - exit_price) / entry_p) * 100.0
+            gross_pnl = (entry_p - exit_price) * qty
             exit_side = "BUY"
+            charges_res = calculate_trade_charges(product, qty, buy_price=exit_price, sell_price=entry_p)
 
-        pnl = round(pnl, 2)
-        pnl_pct = round(pnl_pct, 2)
+        charges = charges_res["total_charges"]
+        net_pnl = round(gross_pnl - charges, 2)
+        gross_pnl = round(gross_pnl, 2)
+        net_pnl_pct = round((net_pnl / (entry_p * qty)) * 100.0, 2) if (entry_p * qty) > 0 else 0.0
+
+        pnl = net_pnl
+        pnl_pct = net_pnl_pct
 
         # Route exit order
         if self.mode == "PAPER":
@@ -981,8 +1082,11 @@ class AlgoEngine:
             "quantity": qty,
             "entry_price": entry_p,
             "exit_price": exit_price,
-            "pnl": pnl,
-            "pnl_pct": pnl_pct,
+            "gross_pnl": gross_pnl,
+            "charges": charges,
+            "charges_breakdown": charges_res["breakdown"],
+            "pnl": net_pnl,
+            "pnl_pct": net_pnl_pct,
             "entry_time": pos.get("entry_time", ""),
             "exit_time": datetime.now(IST).strftime("%H:%M:%S"),
             "duration": f"{duration_min}m",
@@ -996,9 +1100,11 @@ class AlgoEngine:
             del self.active_positions[pos_id]
 
         # Update stats
-        self.stats["realized_pnl"] = round(self.stats["realized_pnl"] + pnl, 2)
+        self.stats["gross_pnl"] = round(self.stats.get("gross_pnl", 0.0) + gross_pnl, 2)
+        self.stats["total_charges"] = round(self.stats.get("total_charges", 0.0) + charges, 2)
+        self.stats["realized_pnl"] = round(self.stats["realized_pnl"] + net_pnl, 2)
         self.stats["total_trades"] += 1
-        if pnl > 0:
+        if net_pnl > 0:
             self.stats["winning_trades"] += 1
         else:
             self.stats["losing_trades"] += 1
@@ -1006,8 +1112,9 @@ class AlgoEngine:
         win_rate = (self.stats["winning_trades"] / self.stats["total_trades"] * 100.0) if self.stats["total_trades"] > 0 else 0.0
         self.stats["win_rate"] = round(win_rate, 1)
 
-        pnl_str = f"+₹{pnl:,.2f}" if pnl >= 0 else f"-₹{abs(pnl):,.2f}"
-        self._log("EXIT", f"🏁 [{reason}] Closed {qty} {symbol} @ ₹{exit_price:.2f} | P&L: {pnl_str} ({pnl_pct:+.2f}%)")
+        pnl_str = f"+₹{net_pnl:,.2f}" if net_pnl >= 0 else f"-₹{abs(net_pnl):,.2f}"
+        gross_str = f"+₹{gross_pnl:,.2f}" if gross_pnl >= 0 else f"-₹{abs(gross_pnl):,.2f}"
+        self._log("EXIT", f"🏁 [{reason}] Closed {qty} {symbol} @ ₹{exit_price:.2f} | Net: {pnl_str} (Gross: {gross_str}, Chg: ₹{charges:.2f})")
         self._record_equity_point()
         self._save_state()
 
@@ -1024,16 +1131,21 @@ class AlgoEngine:
         product = pos["product"]
 
         if side == "BUY":
-            pnl = (exit_price - entry_p) * exit_qty
-            pnl_pct = ((exit_price - entry_p) / entry_p) * 100.0
+            gross_pnl = (exit_price - entry_p) * exit_qty
             exit_side = "SELL"
+            charges_res = calculate_trade_charges(product, exit_qty, buy_price=entry_p, sell_price=exit_price)
         else:
-            pnl = (entry_p - exit_price) * exit_qty
-            pnl_pct = ((entry_p - exit_price) / entry_p) * 100.0
+            gross_pnl = (entry_p - exit_price) * exit_qty
             exit_side = "BUY"
+            charges_res = calculate_trade_charges(product, exit_qty, buy_price=exit_price, sell_price=entry_p)
 
-        pnl = round(pnl, 2)
-        pnl_pct = round(pnl_pct, 2)
+        charges = charges_res["total_charges"]
+        net_pnl = round(gross_pnl - charges, 2)
+        gross_pnl = round(gross_pnl, 2)
+        net_pnl_pct = round((net_pnl / (entry_p * exit_qty)) * 100.0, 2) if (entry_p * exit_qty) > 0 else 0.0
+
+        pnl = net_pnl
+        pnl_pct = net_pnl_pct
 
         # Route partial exit order
         if self.mode == "PAPER":
@@ -1082,8 +1194,11 @@ class AlgoEngine:
             "quantity": exit_qty,
             "entry_price": entry_p,
             "exit_price": exit_price,
-            "pnl": pnl,
-            "pnl_pct": pnl_pct,
+            "gross_pnl": gross_pnl,
+            "charges": charges,
+            "charges_breakdown": charges_res["breakdown"],
+            "pnl": net_pnl,
+            "pnl_pct": net_pnl_pct,
             "entry_time": pos.get("entry_time", ""),
             "exit_time": datetime.now(IST).strftime("%H:%M:%S"),
             "duration": f"{duration_min}m",
@@ -1091,9 +1206,11 @@ class AlgoEngine:
         }
         self.closed_trades.insert(0, trade_record)
 
-        self.stats["realized_pnl"] = round(self.stats["realized_pnl"] + pnl, 2)
+        self.stats["gross_pnl"] = round(self.stats.get("gross_pnl", 0.0) + gross_pnl, 2)
+        self.stats["total_charges"] = round(self.stats.get("total_charges", 0.0) + charges, 2)
+        self.stats["realized_pnl"] = round(self.stats["realized_pnl"] + net_pnl, 2)
         self.stats["total_trades"] += 1
-        if pnl > 0:
+        if net_pnl > 0:
             self.stats["winning_trades"] += 1
         else:
             self.stats["losing_trades"] += 1
@@ -1102,8 +1219,9 @@ class AlgoEngine:
         self.stats["win_rate"] = round(win_rate, 1)
 
         self._record_equity_point()
-        pnl_str = f"+₹{pnl:,.2f}" if pnl >= 0 else f"-₹{abs(pnl):,.2f}"
-        self._log("EXIT", f"🎯 [{reason}] Partial Closed {exit_qty} {symbol} @ ₹{exit_price:.2f} | P&L: {pnl_str} ({pnl_pct:+.2f}%)")
+        pnl_str = f"+₹{net_pnl:,.2f}" if net_pnl >= 0 else f"-₹{abs(net_pnl):,.2f}"
+        gross_str = f"+₹{gross_pnl:,.2f}" if gross_pnl >= 0 else f"-₹{abs(gross_pnl):,.2f}"
+        self._log("EXIT", f"🎯 [{reason}] Partial Closed {exit_qty} {symbol} @ ₹{exit_price:.2f} | Net: {pnl_str} (Gross: {gross_str}, Chg: ₹{charges:.2f})")
         self._save_state()
 
     def manual_exit_position(self, pos_id: str) -> dict:
@@ -1124,8 +1242,15 @@ class AlgoEngine:
     def _recalculate_stats(self):
         """Recomputes unrealized and net P&L across all active positions."""
         unrealized = sum(p.get("pnl", 0.0) for p in self.active_positions.values())
+        unrealized_gross = sum(p.get("gross_pnl", 0.0) for p in self.active_positions.values())
+        unrealized_charges = sum(p.get("charges", 0.0) for p in self.active_positions.values())
+
         self.stats["unrealized_pnl"] = round(unrealized, 2)
-        self.stats["today_pnl"] = round(self.stats["realized_pnl"] + unrealized, 2)
+        self.stats["unrealized_gross"] = round(unrealized_gross, 2)
+        self.stats["unrealized_charges"] = round(unrealized_charges, 2)
+        self.stats["today_pnl"] = round(self.stats.get("realized_pnl", 0.0) + unrealized, 2)
+        self.stats["today_gross_pnl"] = round(self.stats.get("gross_pnl", 0.0) + unrealized_gross, 2)
+        self.stats["today_charges"] = round(self.stats.get("total_charges", 0.0) + unrealized_charges, 2)
 
     def _get_universe_symbols(self) -> List[str]:
         """Resolves symbol list based on selected universe."""
@@ -1214,11 +1339,19 @@ class AlgoEngine:
             return self.closed_trades[:limit]
 
     def clear_closed_trades(self) -> dict:
-        """Clears completed trades history."""
+        """Clears completed trades history and resets realized trade stats."""
         with self._lock:
             self.closed_trades.clear()
+            self.stats["gross_pnl"] = 0.0
+            self.stats["total_charges"] = 0.0
+            self.stats["realized_pnl"] = 0.0
+            self.stats["total_trades"] = 0
+            self.stats["winning_trades"] = 0
+            self.stats["losing_trades"] = 0
+            self.stats["win_rate"] = 0.0
+            self._recalculate_stats()
             self._save_state()
-            self._log("INFO", "🧹 Completed trades history cleared by user.")
+            self._log("INFO", "🧹 Completed trades history & stats cleared by user.")
             return {"success": True, "message": "Trades history cleared successfully."}
 
 
@@ -1379,6 +1512,8 @@ class AlgoEngine:
                     "trailing_sl": sl,
                     "trailing_step_pct": trail_pct,
                     "margin_used": margin_used,
+                    "gross_pnl": 0.0,
+                    "charges": 0.0,
                     "pnl": 0.0,
                     "pnl_pct": 0.0,
                     "entry_time": datetime.now(IST).strftime("%H:%M:%S"),
