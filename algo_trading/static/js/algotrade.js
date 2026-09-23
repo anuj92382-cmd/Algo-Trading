@@ -565,8 +565,9 @@ function renderAlgoPositionsTable(positions) {
         return `
             <tr>
                 <td>
-                    <a href="${tvUrl}" target="_blank" rel="noopener noreferrer" class="stock-chart-link" title="Open TradingView Chart">
-                        <strong>${p.symbol}</strong> ↗
+                    <a href="${tvUrl}" target="_blank" rel="noopener noreferrer" class="stock-chart-link" title="Open ${p.symbol} Chart on TradingView">
+                        <span class="stock-sym-text">${p.symbol}</span>
+                        <span class="stock-chart-arrow">↗</span>
                     </a>
                 </td>
                 <td>
@@ -766,8 +767,9 @@ function renderAlgoTradesTable(trades) {
         return `
             <tr>
                 <td>
-                    <a href="${tvUrl}" target="_blank" rel="noopener noreferrer" class="stock-chart-link">
-                        <strong>${t.symbol}</strong> ↗
+                    <a href="${tvUrl}" target="_blank" rel="noopener noreferrer" class="stock-chart-link" title="Open ${t.symbol} Chart on TradingView">
+                        <span class="stock-sym-text">${t.symbol}</span>
+                        <span class="stock-chart-arrow">↗</span>
                     </a>
                 </td>
                 <td>

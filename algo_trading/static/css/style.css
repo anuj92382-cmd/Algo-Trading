@@ -3718,3 +3718,65 @@ tr.row-crossed-break:hover {
 .badge-mini.glow {
     box-shadow: 0 0 8px rgba(34, 197, 94, 0.4);
 }
+
+/* ── Stock Chart Symbol Link (Ultra-Clear High Contrast for Dark Theme) ── */
+.stock-chart-link {
+    color: #f8fafc !important;
+    text-decoration: none !important;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 3px 8px;
+    background: #14233c;
+    border: 1px solid #1e3a5f;
+    border-radius: 5px;
+    font-size: 12.5px;
+    font-weight: 700;
+    letter-spacing: 0.4px;
+    cursor: pointer;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+    transition: all 0.18s ease-in-out;
+}
+
+.stock-chart-link .stock-sym-text {
+    color: #f8fafc !important;
+    font-weight: 700;
+    font-size: 12.5px;
+    letter-spacing: 0.4px;
+}
+
+.stock-chart-link .stock-chart-arrow {
+    color: #38bdf8;
+    font-size: 11px;
+    font-weight: 800;
+    opacity: 0.9;
+    transition: transform 0.15s ease, color 0.15s ease;
+}
+
+.stock-chart-link:hover {
+    color: #ffffff !important;
+    background: #1c365c;
+    border-color: #38bdf8;
+    box-shadow: 0 0 10px rgba(56, 189, 248, 0.35);
+    text-decoration: none !important;
+    transform: translateY(-1px);
+}
+
+.stock-chart-link:hover .stock-sym-text {
+    color: #ffffff !important;
+}
+
+.stock-chart-link:hover .stock-chart-arrow {
+    color: #ffffff;
+    opacity: 1;
+    transform: translate(1px, -1px);
+}
+
+/* Fallback: Ensure no table links ever inherit dark blue default */
+table tbody td a {
+    color: #38bdf8;
+    text-decoration: none;
+}
+table tbody td a:hover {
+    color: #7dd3fc;
+}
