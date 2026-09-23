@@ -132,6 +132,22 @@ def _init_modules(kite, user_name: str = "", user_id: str = ""):
     _state["error"]          = ""
     logger.info(f"✅ Modules initialized | User: {user_name} ({user_id})")
 
+    # Start LiveTicker WebSocket for real-time millisecond price feed
+    try:
+        from ticker import LiveTicker
+        access_token = getattr(kite, "access_token", "") or ""
+        if not access_token:
+            token_data = _load_token()
+            access_token = token_data.get("access_token", "")
+        if access_token and KITE_API_KEY:
+            if not _state.get("ticker"):
+                ticker = LiveTicker(kite, KITE_API_KEY, access_token, mode="quote")
+                ticker.start(threaded=True)
+                _state["ticker"] = ticker
+                logger.info("📡 LiveTicker WebSocket initialized & running in background")
+    except Exception as _te:
+        logger.warning(f"LiveTicker initialization warning: {_te}")
+
     # Sync algo engine with kite and TRADING_MODE from .env
     engine = _state.get("algo_engine")
     if engine:
@@ -139,6 +155,35 @@ def _init_modules(kite, user_name: str = "", user_id: str = ""):
         if engine.status == "STOPPED":
             engine.start()
             logger.info(f"🤖 Algo Auto-Pilot automatically started in {TRADING_MODE} mode")
+
+
+def _ensure_live_ticker():
+    """Returns active LiveTicker WebSocket instance, starting it if necessary."""
+    ticker = _state.get("ticker")
+    if ticker and ticker.is_connected:
+        return ticker
+
+    kite = _state.get("kite")
+    if not kite:
+        _try_auto_login()
+        kite = _state.get("kite")
+
+    if kite and KITE_API_KEY:
+        try:
+            from ticker import LiveTicker
+            access_token = getattr(kite, "access_token", "") or ""
+            if not access_token:
+                access_token = _load_token().get("access_token", "")
+            if access_token:
+                if not ticker:
+                    ticker = LiveTicker(kite, KITE_API_KEY, access_token, mode="quote")
+                    ticker.start(threaded=True)
+                    _state["ticker"] = ticker
+                    logger.info("📡 LiveTicker WebSocket started via _ensure_live_ticker()")
+                return ticker
+        except Exception as e:
+            logger.warning(f"Failed to start LiveTicker in _ensure_live_ticker: {e}")
+    return _state.get("ticker")
 
 
 def _try_auto_login() -> bool:

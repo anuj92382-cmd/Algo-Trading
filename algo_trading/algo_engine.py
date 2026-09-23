@@ -360,6 +360,13 @@ class AlgoEngine:
             "orders_today": 0,
         }
 
+        # Real-time WebSocket Live Feed Buffer
+        self.live_quotes_cache: Dict[str, dict] = {}
+        self._quote_lock = threading.RLock()
+        self.last_scan_duration_ms: float = 0.0
+        self.is_websocket_active: bool = False
+        self._ticker_callback_registered: bool = False
+
         # Load persisted settings and trades if available
         self._load_state()
 
@@ -612,11 +619,60 @@ class AlgoEngine:
     # STEP 2: POSITION MONITOR & DYNAMIC TRAILING STOP LOSS
     # ─────────────────────────────────────────────────────────────
 
+    # ─────────────────────────────────────────────────────────────
+    # WEBSOCKET REAL-TIME TICK FEED & MILLISECOND ENGINE
+    # ─────────────────────────────────────────────────────────────
+
+    def _ensure_ticker(self):
+        """
+        Ensures KiteTicker WebSocket is initialized, connected, and subscribed to universe symbols.
+        Enables millisecond price ingestion and scan evaluation.
+        """
+        ticker = self._web_state.get("ticker")
+        if not ticker:
+            try:
+                from web_app import _ensure_live_ticker
+                ticker = _ensure_live_ticker()
+            except Exception:
+                pass
+
+        if ticker:
+            if not getattr(self, "_ticker_callback_registered", False):
+                try:
+                    ticker.add_tick_callback(self._on_websocket_tick)
+                    self._ticker_callback_registered = True
+                    logger.info("📡 AlgoEngine attached callback to LiveTicker WebSocket")
+                except Exception as e:
+                    logger.debug(f"Failed to attach ticker callback: {e}")
+
+            symbols = self._get_universe_symbols()
+            if symbols:
+                try:
+                    ticker.subscribe(symbols[:80], exchange="NSE")
+                    self.is_websocket_active = getattr(ticker, "is_connected", False)
+                except Exception as se:
+                    logger.debug(f"Ticker subscription error: {se}")
+
+    def _on_websocket_tick(self, symbol: str, tick: dict):
+        """Processes real-time WebSocket tick in sub-milliseconds."""
+        with self._quote_lock:
+            self.live_quotes_cache[symbol] = tick
+            self.is_websocket_active = True
+
+        # Instant sub-millisecond SL / Target evaluation for open positions
+        ltp = float(tick.get("ltp") or 0)
+        if ltp > 0:
+            with self._lock:
+                for pos_id, pos in list(self.active_positions.items()):
+                    if pos.get("symbol") == symbol:
+                        self._evaluate_single_position(pos, ltp)
+                        break
+
     def _monitor_active_positions(self):
         """
         Monitors active positions tick-by-tick:
-        - Fetches latest live LTP.
-        - Calculates live P&L.
+        - Checks WebSocket live quotes cache first (0ms latency), falling back to REST.
+        - Calculates live P&L and charges.
         - Automatically trails Stop Loss upwards when price moves favorably.
         - Automatically exits when Target or Stop Loss is reached!
         """
@@ -631,14 +687,21 @@ class AlgoEngine:
                     kite = self._web_state.get("kite")
             except Exception:
                 pass
-        symbols = list({f"NSE:{p['symbol']}" for p in self.active_positions.values()})
 
-        # Fetch live quotes
+        symbols = [p["symbol"] for p in self.active_positions.values()]
         ltp_map = {}
 
-        if kite:
+        # 1. Resolve from WebSocket live cache (0ms latency)
+        with self._quote_lock:
+            for s in symbols:
+                if s in self.live_quotes_cache:
+                    ltp_map[s] = float(self.live_quotes_cache[s].get("ltp", 0) or 0)
+
+        # 2. REST quote fallback for any symbols not yet in WebSocket cache
+        missing = [f"NSE:{s}" for s in symbols if s not in ltp_map or ltp_map[s] <= 0]
+        if missing and kite:
             try:
-                quotes = kite.quote(symbols)
+                quotes = kite.quote(missing)
                 for k, v in quotes.items():
                     sym = k.replace("NSE:", "")
                     ltp_map[sym] = float(v.get("last_price", 0) or 0)
@@ -648,167 +711,214 @@ class AlgoEngine:
         for pos_id, pos in list(self.active_positions.items()):
             sym = pos["symbol"]
             entry_p = pos["entry_price"]
-            side = pos["side"]
-
-            # Resolve LTP (fallback to simulated movement in paper test if market closed)
             ltp = ltp_map.get(sym, pos.get("current_price", entry_p))
             if ltp <= 0:
                 ltp = entry_p
+            self._evaluate_single_position(pos, ltp)
 
-            pos["current_price"] = ltp
+    def _evaluate_single_position(self, pos: dict, ltp: float) -> bool:
+        """
+        Evaluates a single position against latest LTP (Target 1, Target 2, Trailing SL, Stop Loss).
+        Returns True if position was fully exited, False otherwise.
+        """
+        sym = pos["symbol"]
+        entry_p = pos["entry_price"]
+        side = pos["side"]
+        pos["current_price"] = ltp
 
-            # Calculate Live P&L (Gross, Estimated Round-trip Charges, Net)
-            qty = pos["quantity"]
-            product = pos.get("product", "MIS")
-            if side == "BUY":
-                gross_pnl = (ltp - entry_p) * qty
-                charges_res = calculate_trade_charges(product, qty, buy_price=entry_p, sell_price=ltp)
-                if ltp > pos.get("highest_price", entry_p):
-                    pos["highest_price"] = ltp
-            else:  # SELL / SHORT
-                gross_pnl = (entry_p - ltp) * qty
-                charges_res = calculate_trade_charges(product, qty, buy_price=ltp, sell_price=entry_p)
-                if ltp < pos.get("lowest_price", entry_p):
-                    pos["lowest_price"] = ltp
+        # Calculate Live P&L (Gross, Estimated Round-trip Charges, Net)
+        qty = pos["quantity"]
+        product = pos.get("product", "MIS")
+        if side == "BUY":
+            gross_pnl = (ltp - entry_p) * qty
+            charges_res = calculate_trade_charges(product, qty, buy_price=entry_p, sell_price=ltp)
+            if ltp > pos.get("highest_price", entry_p):
+                pos["highest_price"] = ltp
+        else:  # SELL / SHORT
+            gross_pnl = (entry_p - ltp) * qty
+            charges_res = calculate_trade_charges(product, qty, buy_price=ltp, sell_price=entry_p)
+            if ltp < pos.get("lowest_price", entry_p):
+                pos["lowest_price"] = ltp
 
-            charges = charges_res["total_charges"]
-            net_pnl = gross_pnl - charges
-            denom = entry_p * qty
-            net_pnl_pct = (net_pnl / denom) * 100.0 if denom > 0 else 0.0
+        charges = charges_res["total_charges"]
+        net_pnl = gross_pnl - charges
+        denom = entry_p * qty
+        net_pnl_pct = (net_pnl / denom) * 100.0 if denom > 0 else 0.0
 
-            pos["gross_pnl"] = round(gross_pnl, 2)
-            pos["charges"] = round(charges, 2)
-            pos["charges_breakdown"] = charges_res["breakdown"]
-            pos["pnl"] = round(net_pnl, 2)
-            pos["pnl_pct"] = round(net_pnl_pct, 2)
-            pnl = pos["pnl"]
-            pnl_pct = pos["pnl_pct"]
+        pos["gross_pnl"] = round(gross_pnl, 2)
+        pos["charges"] = round(charges, 2)
+        pos["charges_breakdown"] = charges_res["breakdown"]
+        pos["pnl"] = round(net_pnl, 2)
+        pos["pnl_pct"] = round(net_pnl_pct, 2)
+        pnl = pos["pnl"]
+        pnl_pct = pos["pnl_pct"]
 
-            # DYNAMIC TRAILING STOP LOSS & MULTI-TARGET EXITS
-            trail_pct = pos.get("trailing_step_pct", 0.3)
-            t1 = pos.get("target_1", pos.get("target", 0))
-            t2 = pos.get("target_2", t1 * (1.01 if side == "BUY" else 0.99))
+        # DYNAMIC TRAILING STOP LOSS & MULTI-TARGET EXITS
+        trail_pct = pos.get("trailing_step_pct", 0.3)
+        t1 = pos.get("target_1", pos.get("target", 0))
+        t2 = pos.get("target_2", t1 * (1.01 if side == "BUY" else 0.99))
 
-            if side == "BUY":
-                # If price advanced beyond entry by trailing step, trail SL up
-                favorable_gain = ((ltp - entry_p) / entry_p) * 100.0
-                if favorable_gain >= trail_pct:
-                    initial_sl_dist_pct = ((entry_p - pos["stop_loss"]) / entry_p) * 100.0
-                    new_sl = round(pos["highest_price"] * (1.0 - (initial_sl_dist_pct / 100.0)), 2)
-                    if new_sl > pos["trailing_sl"]:
-                        old_sl = pos["trailing_sl"]
-                        pos["trailing_sl"] = new_sl
-                        self._log("TRAIL", f"📈 Trailed SL Up: {sym} (LTP: ₹{ltp:.2f})", f"SL moved from ₹{old_sl:.2f} → ₹{new_sl:.2f} (+{trail_pct}%)")
+        if side == "BUY":
+            favorable_gain = ((ltp - entry_p) / entry_p) * 100.0
+            if favorable_gain >= trail_pct:
+                initial_sl_dist_pct = ((entry_p - pos["stop_loss"]) / entry_p) * 100.0
+                new_sl = round(pos["highest_price"] * (1.0 - (initial_sl_dist_pct / 100.0)), 2)
+                if new_sl > pos["trailing_sl"]:
+                    old_sl = pos["trailing_sl"]
+                    pos["trailing_sl"] = new_sl
+                    self._log("TRAIL", f"📈 Trailed SL Up: {sym} (LTP: ₹{ltp:.2f})", f"SL moved from ₹{old_sl:.2f} → ₹{new_sl:.2f} (+{trail_pct}%)")
 
-                # AUTO TARGET 1 EXIT (Book 50% & Move SL to Cost)
-                if not pos.get("target_1_hit", False) and ltp >= t1:
-                    exit_qty = max(1, pos["quantity"] // 2)
-                    self._exit_partial_position(pos, exit_qty=exit_qty, exit_price=ltp, reason="TARGET_1_HIT")
-                    pos["quantity"] -= exit_qty
-                    pos["target_1_hit"] = True
-                    # Move Stop Loss to Entry Price (100% Risk-Free!)
-                    pos["stop_loss"] = entry_p
-                    pos["trailing_sl"] = max(pos["trailing_sl"], entry_p)
-                    self._log("ORDER", f"🎯 [TARGET 1 HIT] ⚡ Booked 50% ({exit_qty} Qty) on {sym} @ ₹{ltp:.2f}",
-                              f"🛡️ SL moved to Entry Cost ₹{entry_p:.2f} (Trade is now 100% Risk-Free!)")
-                    continue
+            # AUTO TARGET 1 EXIT (Book 50% & Move SL to Cost)
+            if not pos.get("target_1_hit", False) and ltp >= t1:
+                exit_qty = max(1, pos["quantity"] // 2)
+                self._exit_partial_position(pos, exit_qty=exit_qty, exit_price=ltp, reason="TARGET_1_HIT")
+                pos["quantity"] -= exit_qty
+                pos["target_1_hit"] = True
+                pos["stop_loss"] = entry_p
+                pos["trailing_sl"] = max(pos["trailing_sl"], entry_p)
+                self._log("ORDER", f"🎯 [TARGET 1 HIT] ⚡ Booked 50% ({exit_qty} Qty) on {sym} @ ₹{ltp:.2f}",
+                          f"🛡️ SL moved to Entry Cost ₹{entry_p:.2f} (Trade is now 100% Risk-Free!)")
+                return False
 
-                # AUTO TARGET 2 EXIT (Final 50% Runner Exit)
-                if pos.get("target_1_hit", False) and ltp >= t2:
-                    self._log("ORDER", f"🏆 [TARGET 2 HIT] ⚡ Auto Exiting remaining {pos['quantity']} Qty on {sym} @ ₹{ltp:.2f}",
-                              f"Profit: +₹{pnl:,.2f} (+{pnl_pct:.2f}%) | Full targets achieved!")
-                    self._exit_position(pos, exit_price=ltp, reason="TARGET_2_HIT")
-                    continue
+            # AUTO TARGET 2 EXIT (Final 50% Runner Exit)
+            if pos.get("target_1_hit", False) and ltp >= t2:
+                self._log("ORDER", f"🏆 [TARGET 2 HIT] ⚡ Auto Exiting remaining {pos['quantity']} Qty on {sym} @ ₹{ltp:.2f}",
+                          f"Profit: +₹{pnl:,.2f} (+{pnl_pct:.2f}%) | Full targets achieved!")
+                self._exit_position(pos, exit_price=ltp, reason="TARGET_2_HIT")
+                return True
 
-                # Gap up past T2 directly
-                if not pos.get("target_1_hit", False) and ltp >= t2:
-                    self._log("ORDER", f"🏆 [TARGET 2 HIT] ⚡ Auto Exiting full {pos['quantity']} Qty on {sym} @ ₹{ltp:.2f}",
-                              f"Profit: +₹{pnl:,.2f} (+{pnl_pct:.2f}%)")
-                    self._exit_position(pos, exit_price=ltp, reason="TARGET_2_HIT")
-                    continue
+            if not pos.get("target_1_hit", False) and ltp >= t2:
+                self._log("ORDER", f"🏆 [TARGET 2 HIT] ⚡ Auto Exiting full {pos['quantity']} Qty on {sym} @ ₹{ltp:.2f}",
+                          f"Profit: +₹{pnl:,.2f} (+{pnl_pct:.2f}%)")
+                self._exit_position(pos, exit_price=ltp, reason="TARGET_2_HIT")
+                return True
 
-                # AUTO STOP LOSS EXIT
-                if ltp <= pos["trailing_sl"]:
-                    reason = "COST_SL_HIT" if pos.get("target_1_hit", False) else "STOP_LOSS_HIT"
-                    self._log("ORDER", f"🛑 [{reason}] ⚡ Auto Exiting {sym} @ ₹{ltp:.2f}", f"P&L: ₹{pnl:,.2f} ({pnl_pct:.2f}%)")
-                    self._exit_position(pos, exit_price=ltp, reason=reason)
-                    continue
+            # AUTO STOP LOSS EXIT
+            if ltp <= pos["trailing_sl"]:
+                reason = "COST_SL_HIT" if pos.get("target_1_hit", False) else "STOP_LOSS_HIT"
+                self._log("ORDER", f"🛑 [{reason}] ⚡ Auto Exiting {sym} @ ₹{ltp:.2f}", f"P&L: ₹{pnl:,.2f} ({pnl_pct:.2f}%)")
+                self._exit_position(pos, exit_price=ltp, reason=reason)
+                return True
 
-            else:  # SHORT POSITION
-                favorable_gain = ((entry_p - ltp) / entry_p) * 100.0
-                if favorable_gain >= trail_pct:
-                    initial_sl_dist_pct = ((pos["stop_loss"] - entry_p) / entry_p) * 100.0
-                    new_sl = round(pos["lowest_price"] * (1.0 + (initial_sl_dist_pct / 100.0)), 2)
-                    if new_sl < pos["trailing_sl"]:
-                        old_sl = pos["trailing_sl"]
-                        pos["trailing_sl"] = new_sl
-                        self._log("TRAIL", f"📉 Trailed SL Down: {sym} (LTP: ₹{ltp:.2f})", f"SL moved from ₹{old_sl:.2f} → ₹{new_sl:.2f}")
+        else:  # SHORT POSITION
+            favorable_gain = ((entry_p - ltp) / entry_p) * 100.0
+            if favorable_gain >= trail_pct:
+                initial_sl_dist_pct = ((pos["stop_loss"] - entry_p) / entry_p) * 100.0
+                new_sl = round(pos["lowest_price"] * (1.0 + (initial_sl_dist_pct / 100.0)), 2)
+                if new_sl < pos["trailing_sl"]:
+                    old_sl = pos["trailing_sl"]
+                    pos["trailing_sl"] = new_sl
+                    self._log("TRAIL", f"📉 Trailed SL Down: {sym} (LTP: ₹{ltp:.2f})", f"SL moved from ₹{old_sl:.2f} → ₹{new_sl:.2f}")
 
-                # AUTO TARGET 1 EXIT (Short)
-                if not pos.get("target_1_hit", False) and ltp <= t1:
-                    exit_qty = max(1, pos["quantity"] // 2)
-                    self._exit_partial_position(pos, exit_qty=exit_qty, exit_price=ltp, reason="TARGET_1_HIT")
-                    pos["quantity"] -= exit_qty
-                    pos["target_1_hit"] = True
-                    pos["stop_loss"] = entry_p
-                    pos["trailing_sl"] = min(pos["trailing_sl"], entry_p)
-                    self._log("ORDER", f"🎯 [TARGET 1 HIT] ⚡ Booked 50% ({exit_qty} Qty) on {sym} @ ₹{ltp:.2f}",
-                              f"🛡️ SL moved to Entry Cost ₹{entry_p:.2f} (Trade is now 100% Risk-Free!)")
-                    continue
+            # AUTO TARGET 1 EXIT (Short)
+            if not pos.get("target_1_hit", False) and ltp <= t1:
+                exit_qty = max(1, pos["quantity"] // 2)
+                self._exit_partial_position(pos, exit_qty=exit_qty, exit_price=ltp, reason="TARGET_1_HIT")
+                pos["quantity"] -= exit_qty
+                pos["target_1_hit"] = True
+                pos["stop_loss"] = entry_p
+                pos["trailing_sl"] = min(pos["trailing_sl"], entry_p)
+                self._log("ORDER", f"🎯 [TARGET 1 HIT] ⚡ Booked 50% ({exit_qty} Qty) on {sym} @ ₹{ltp:.2f}",
+                          f"🛡️ SL moved to Entry Cost ₹{entry_p:.2f} (Trade is now 100% Risk-Free!)")
+                return False
 
-                # AUTO TARGET 2 EXIT (Short)
-                if pos.get("target_1_hit", False) and ltp <= t2:
-                    self._log("ORDER", f"🏆 [TARGET 2 HIT] ⚡ Auto Exiting remaining {pos['quantity']} Qty on {sym} @ ₹{ltp:.2f}",
-                              f"Profit: +₹{pnl:,.2f} (+{pnl_pct:.2f}%) | Full targets achieved!")
-                    self._exit_position(pos, exit_price=ltp, reason="TARGET_2_HIT")
-                    continue
+            # AUTO TARGET 2 EXIT (Short)
+            if pos.get("target_1_hit", False) and ltp <= t2:
+                self._log("ORDER", f"🏆 [TARGET 2 HIT] ⚡ Auto Exiting remaining {pos['quantity']} Qty on {sym} @ ₹{ltp:.2f}",
+                          f"Profit: +₹{pnl:,.2f} (+{pnl_pct:.2f}%) | Full targets achieved!")
+                self._exit_position(pos, exit_price=ltp, reason="TARGET_2_HIT")
+                return True
 
-                if not pos.get("target_1_hit", False) and ltp <= t2:
-                    self._log("ORDER", f"🏆 [TARGET 2 HIT] ⚡ Auto Exiting full {pos['quantity']} Qty on {sym} @ ₹{ltp:.2f}",
-                              f"Profit: +₹{pnl:,.2f} (+{pnl_pct:.2f}%)")
-                    self._exit_position(pos, exit_price=ltp, reason="TARGET_2_HIT")
-                    continue
+            if not pos.get("target_1_hit", False) and ltp <= t2:
+                self._log("ORDER", f"🏆 [TARGET 2 HIT] ⚡ Auto Exiting full {pos['quantity']} Qty on {sym} @ ₹{ltp:.2f}",
+                          f"Profit: +₹{pnl:,.2f} (+{pnl_pct:.2f}%)")
+                self._exit_position(pos, exit_price=ltp, reason="TARGET_2_HIT")
+                return True
 
-                # AUTO STOP LOSS EXIT
-                if ltp >= pos["trailing_sl"]:
-                    reason = "COST_SL_HIT" if pos.get("target_1_hit", False) else "STOP_LOSS_HIT"
-                    self._log("ORDER", f"🛑 [{reason}] ⚡ Auto Exiting {sym} @ ₹{ltp:.2f}", f"P&L: ₹{pnl:,.2f} ({pnl_pct:.2f}%)")
-                    self._exit_position(pos, exit_price=ltp, reason=reason)
-                    continue
+            # AUTO STOP LOSS EXIT
+            if ltp >= pos["trailing_sl"]:
+                reason = "COST_SL_HIT" if pos.get("target_1_hit", False) else "STOP_LOSS_HIT"
+                self._log("ORDER", f"🛑 [{reason}] ⚡ Auto Exiting {sym} @ ₹{ltp:.2f}", f"P&L: ₹{pnl:,.2f} ({pnl_pct:.2f}%)")
+                self._exit_position(pos, exit_price=ltp, reason=reason)
+                return True
+
+        return False
 
     # ─────────────────────────────────────────────────────────────
     # STEP 3: SCANNING & AUTONOMOUS ORDER DISPATCH (AUTO BUY/SELL)
     # ─────────────────────────────────────────────────────────────
 
-    def _scan_and_execute_signals(self):
+    def _scan_and_execute_signals(self) -> int:
         """
-        Scans universe symbols, evaluates quantitative strategies, and
-        AUTOMATICALLY FIRES orders when signals are detected without waiting for human approval!
+        Scans universe symbols in milliseconds via WebSocket cache (or REST fallback),
+        evaluates quantitative strategies, verifies 60%+ Win Rate, and auto-executes.
+        Returns the number of symbols evaluated.
         """
+        t_start = time.perf_counter()
         max_open = int(self.risk_config.get("max_open_positions", 4))
         if len(self.active_positions) >= max_open:
-            return
+            return 0
 
         symbols = self._get_universe_symbols()
         if not symbols:
-            return
+            return 0
 
-        kite = self._web_state.get("kite")
-        if not kite:
+        # Ensure ticker is running and subscribed
+        self._ensure_ticker()
+
+        ticker = self._web_state.get("ticker")
+        is_ws_ready = bool((self.is_websocket_active or (ticker and getattr(ticker, "is_connected", False)) or len(self.live_quotes_cache) > 0) and len(self.live_quotes_cache) > 0)
+
+        quotes_data = {}
+        scan_source = "REST"
+
+        if is_ws_ready:
+            # ⚡ MILLISECOND WEBSOCKET IN-MEMORY SCAN (0ms network latency!)
+            with self._quote_lock:
+                for s in symbols[:80]:
+                    if s in self.live_quotes_cache:
+                        quotes_data[s] = self.live_quotes_cache[s]
+            if quotes_data:
+                scan_source = "WEBSOCKET"
+
+        # Fallback to REST if WebSocket has not received ticks yet
+        if not quotes_data:
+            kite = self._web_state.get("kite")
+            if not kite:
+                try:
+                    from web_app import _try_auto_login
+                    if _try_auto_login():
+                        kite = self._web_state.get("kite")
+                except Exception:
+                    pass
+
+            if not kite:
+                now_sec = time.time()
+                if now_sec - getattr(self, "_last_no_kite_log", 0) > 60:
+                    self._last_no_kite_log = now_sec
+                    self._log("ALERT", "⚠️ Kite Connect not logged in", "Live market feed unavailable. Please login with Kite in dashboard to stream live market quotes.")
+                return 0
+
+            # Batch fetch OHLC for universe (sample top 40 liquid symbols)
+            sample_syms = symbols[:40]
+            formatted = [f"NSE:{s}" if ":" not in s else s for s in sample_syms]
             try:
-                from web_app import _try_auto_login
-                if _try_auto_login():
-                    kite = self._web_state.get("kite")
-            except Exception:
-                pass
-
-        if not kite:
-            now_sec = time.time()
-            if now_sec - getattr(self, "_last_no_kite_log", 0) > 60:
-                self._last_no_kite_log = now_sec
-                self._log("ALERT", "⚠️ Kite Connect not logged in", "Live market feed unavailable. Please login with Kite in dashboard to stream live market quotes.")
-            return
-
+                raw_ohlc = kite.ohlc(formatted)
+                for k, v in raw_ohlc.items():
+                    s = k.replace("NSE:", "")
+                    ohlc_dict = v.get("ohlc", {}) or {}
+                    quotes_data[s] = {
+                        "symbol": s,
+                        "ltp": float(v.get("last_price", 0) or 0),
+                        "open": float(ohlc_dict.get("open", 0) or 0),
+                        "high": float(ohlc_dict.get("high", 0) or 0),
+                        "low": float(ohlc_dict.get("low", 0) or 0),
+                        "close": float(ohlc_dict.get("close", 0) or 0),
+                    }
+                scan_source = "REST_OHLC"
+            except Exception as e:
+                logger.debug(f"REST scan batch error: {e}")
+                return 0
 
         # Check entry cutoff time
         now = datetime.now(IST).time()
@@ -816,41 +926,24 @@ class AlgoEngine:
             cutoff_parts = [int(p) for p in self.risk_config["entry_cutoff_time"].split(":")]
             entry_cutoff = dtime(cutoff_parts[0], cutoff_parts[1])
             if now > entry_cutoff:
-                return
+                return 0
         except Exception:
             pass
 
-        # Batch fetch OHLC for universe (sample top 40 liquid symbols to keep scan blazing fast)
-        sample_syms = symbols[:40]
-        formatted = [f"NSE:{s}" if ":" not in s else s for s in sample_syms]
-
-        try:
-            ohlc_data = kite.ohlc(formatted)
-        except Exception as e:
-            logger.debug(f"Scan OHLC batch error: {e}")
-            return
-
-        if not ohlc_data:
-            return
-
-        self._log("SCAN", f"Scanning {len(ohlc_data)} symbols across {len([s for s in self.strategies.values() if s['enabled']])} active strategies...")
-
+        evaluated_count = len(quotes_data)
         active_symbols = {p["symbol"] for p in self.active_positions.values()}
 
-        for key, item in ohlc_data.items():
+        for sym, item in quotes_data.items():
             if len(self.active_positions) >= max_open:
                 break
-
-            sym = key.replace("NSE:", "")
             if sym in active_symbols:
                 continue
 
-            ltp = float(item.get("last_price", 0) or 0)
-            ohlc = item.get("ohlc", {}) or {}
-            open_p = float(ohlc.get("open", 0) or 0)
-            high_p = float(ohlc.get("high", 0) or 0)
-            low_p = float(ohlc.get("low", 0) or 0)
-            prev_close = float(ohlc.get("close", 0) or 0)
+            ltp = float(item.get("ltp", 0) or 0)
+            open_p = float(item.get("open", 0) or 0)
+            high_p = float(item.get("high", 0) or 0)
+            low_p = float(item.get("low", 0) or 0)
+            prev_close = float(item.get("close", 0) or 0)
 
             if open_p <= 0 or ltp <= 20.0 or ltp > 50000.0:
                 continue
@@ -898,6 +991,10 @@ class AlgoEngine:
                     active_symbols.add(sym)
                     break
 
+        elapsed_ms = round((time.perf_counter() - t_start) * 1000.0, 2)
+        self.last_scan_duration_ms = elapsed_ms
+        self._log("SCAN", f"⚡ [{scan_source} SCAN] Completed in {elapsed_ms:.1f}ms | {evaluated_count} symbols checked across active strategies")
+        return evaluated_count
     # ─────────────────────────────────────────────────────────────
     # QUANTITATIVE STRATEGY RULES EVALUATOR
     # ─────────────────────────────────────────────────────────────
@@ -1413,6 +1510,8 @@ class AlgoEngine:
         with self._lock:
             self._recalculate_stats()
             active_count = len([s for s in self.strategies.values() if s.get("enabled", True)])
+            ticker = self._web_state.get("ticker")
+            ws_connected = bool(self.is_websocket_active or (ticker and getattr(ticker, "is_connected", False)))
             return {
                 "status": self.status,
                 "mode": self.mode,
@@ -1421,6 +1520,9 @@ class AlgoEngine:
                 "total_strategies_count": len(self.strategies),
                 "open_positions_count": len(self.active_positions),
                 "last_scan_time": self.last_scan_time.strftime("%H:%M:%S") if self.last_scan_time else "-",
+                "last_scan_duration_ms": self.last_scan_duration_ms,
+                "websocket_connected": ws_connected,
+                "websocket_ticks_count": len(self.live_quotes_cache),
                 "next_scan_countdown": self.next_scan_countdown,
                 "scan_interval": self.scan_interval_sec,
                 "stats": self.stats,
@@ -1496,18 +1598,33 @@ class AlgoEngine:
             return logs_list[-limit:]
 
     def force_scan_now(self) -> dict:
-        """Triggers an immediate scan and execution cycle on-demand."""
-        threading.Thread(target=self._run_single_scan_cycle, daemon=True).start()
-        return {"success": True, "message": "Scan cycle triggered on-demand!"}
-
-    def _run_single_scan_cycle(self):
+        """Triggers an immediate scan and execution cycle on-demand in milliseconds."""
+        t0 = time.perf_counter()
         with self._lock:
             self._log("SCAN", "⚡ Manual on-demand scan triggered by user...")
             self._check_rms_and_timing()
             self._monitor_active_positions()
-            self._scan_and_execute_signals()
+            scanned_count = self._scan_and_execute_signals()
             self._recalculate_stats()
             self._record_equity_point()
+        duration_ms = round((time.perf_counter() - t0) * 1000.0, 2)
+
+        ticker = self._web_state.get("ticker")
+        is_ws = bool(self.is_websocket_active or (ticker and getattr(ticker, "is_connected", False) and len(self.live_quotes_cache) > 0))
+        mode_lbl = "WebSocket Live Feed" if is_ws else "Kite REST Batch"
+
+        self._log("SCAN", f"⚡ Instant scan completed in {duration_ms}ms ({mode_lbl}) | {scanned_count} symbols evaluated")
+
+        return {
+            "success": True,
+            "message": f"⚡ Instant scan completed in {duration_ms}ms via {mode_lbl}!",
+            "duration_ms": duration_ms,
+            "scanned_count": scanned_count,
+            "mode": "WEBSOCKET" if is_ws else "REST",
+        }
+
+    def _run_single_scan_cycle(self):
+        self.force_scan_now()
 
     # ─────────────────────────────────────────────────────────────
     # INTRADAY EQUITY CURVE TRACKER

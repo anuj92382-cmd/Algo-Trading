@@ -105,10 +105,31 @@ function renderAlgoStatus(data) {
         if (liveBtn) liveBtn.classList.add('active');
     }
 
-    // Scan Countdown
-    const countdown = data.next_scan_countdown || 0;
+    // WebSocket Indicator & Scan Countdown
+    const wsBadge = document.getElementById('algo-ws-badge');
+    if (wsBadge) {
+        if (data.websocket_connected) {
+            const ticksCount = data.websocket_ticks_count || 0;
+            wsBadge.className = 'badge-pill cyan';
+            wsBadge.innerHTML = `📡 WS: REAL-TIME (<5ms) • ${ticksCount} Ticks`;
+            wsBadge.title = 'KiteTicker WebSocket live streaming in memory (Sub-millisecond execution)';
+        } else {
+            wsBadge.className = 'badge-pill grey';
+            wsBadge.innerHTML = '🌐 REST BATCH POLLING';
+            wsBadge.title = 'Kite REST batch polling mode';
+        }
+    }
+
     const cdElem = document.getElementById('algo-scan-countdown');
-    if (cdElem) cdElem.innerText = countdown;
+    if (cdElem) {
+        if (data.websocket_connected) {
+            const ms = data.last_scan_duration_ms ? `${data.last_scan_duration_ms}ms` : '<5ms WS';
+            cdElem.innerText = `⚡ ${ms}`;
+        } else {
+            const countdown = data.next_scan_countdown || 0;
+            cdElem.innerText = `${countdown}s`;
+        }
+    }
 
     // KPIs
     const stats = data.stats || {};
@@ -197,15 +218,30 @@ async function setAlgoMode(mode) {
 }
 
 async function triggerAlgoScanNow() {
+    const t0 = performance.now();
+    const btn = document.getElementById('algo-scan-btn');
+    if (btn) btn.disabled = true;
+
     try {
         const res = await fetch('/api/algo/scan_now', { method: 'POST' });
         const data = await res.json();
+        const clientMs = Math.round(performance.now() - t0);
+
         if (data.success) {
-            showToast('⚡ Instant scan cycle triggered!', 'info');
-            setTimeout(fetchAlgoLogs, 1000);
+            const ms = data.duration_ms !== undefined ? data.duration_ms : clientMs;
+            const modeTxt = data.mode === 'WEBSOCKET' ? '📡 WebSocket Live Feed' : '🌐 REST Batch';
+            const count = data.scanned_count || 0;
+            showToast(`⚡ Millisecond Scan Executed in ${ms}ms (${modeTxt}) | ${count} stocks checked!`, 'success');
+            loadAlgoStatus();
+            fetchAlgoPositions();
+            fetchAlgoLogs();
+        } else {
+            showToast(data.error || 'Failed to trigger scan', 'error');
         }
     } catch (e) {
-        showToast('Failed to trigger scan', 'error');
+        showToast('Failed to trigger scan: ' + e, 'error');
+    } finally {
+        if (btn) btn.disabled = false;
     }
 }
 

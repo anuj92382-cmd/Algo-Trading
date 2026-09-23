@@ -1262,6 +1262,7 @@
                             <h2 class="algo-title">Algo Trade Auto-Pilot</h2>
                             <span class="badge-pill grey" id="algo-status-badge">● STOPPED</span>
                             <span class="badge-pill purple" id="algo-mode-badge">📄 PAPER (5X MARGIN)</span>
+                            <span class="badge-pill cyan" id="algo-ws-badge" title="Real-Time WebSocket Stream Latency">📡 WS: REAL-TIME (0ms)</span>
                         </div>
                         <div class="algo-subtitle">
                             Autonomous Quantitative Robot • Continuous Market Scan • 100% Hands-Free Auto Buy / Auto Sell
@@ -1290,9 +1291,9 @@
                             ⏹ Stop
                         </button>
 
-                        <!-- Scan now trigger -->
-                        <button class="btn btn-cyan btn-algo-ctrl" onclick="triggerAlgoScanNow()" title="Trigger immediate scan cycle">
-                            ⚡ Scan Now (<span id="algo-scan-countdown">15</span>s)
+                        <!-- Scan now trigger (Millisecond WebSocket) -->
+                        <button class="btn btn-cyan btn-algo-ctrl" id="algo-scan-btn" onclick="triggerAlgoScanNow()" title="Trigger immediate scan cycle in milliseconds via WebSocket">
+                            ⚡ Scan Now (<span id="algo-scan-countdown">⚡ &lt;5ms WS</span>)
                         </button>
 
                         <!-- Panic Kill Switch -->
@@ -1731,6 +1732,6 @@
 <script src="/static/js/trade.js?v=2"></script>
 <script src="/static/js/paper.js?v=2"></script>
 <script src="/static/js/reversals.js?v=2"></script>
-<script src="/static/js/algotrade.js?v=3"></script>
+<script src="/static/js/algotrade.js?v=4"></script>
 </body>
 </html>

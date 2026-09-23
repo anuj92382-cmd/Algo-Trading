@@ -172,18 +172,34 @@ class LiveTicker:
             self.ticker.unsubscribe(tokens)
             logger.info(f"Unsubscribed: {symbols}")
 
+    def _ensure_token_cache(self, exchange: str = "NSE") -> dict:
+        """Caches instrument tokens in RAM for millisecond resolution."""
+        if not hasattr(self, "_token_cache"):
+            self._token_cache = {}
+        if exchange not in self._token_cache:
+            try:
+                instruments = self.kite.instruments(exchange)
+                lookup = {}
+                for inst in instruments:
+                    sym = inst.get("tradingsymbol")
+                    tok = inst.get("instrument_token")
+                    if sym and tok:
+                        lookup[sym] = tok
+                self._token_cache[exchange] = lookup
+                logger.info(f"⚡ Cached {len(lookup)} {exchange} instrument tokens for millisecond WebSocket lookup")
+            except Exception as e:
+                logger.error(f"Token cache fetch error for {exchange}: {e}")
+                self._token_cache[exchange] = {}
+        return self._token_cache[exchange]
+
     def _get_instrument_token(self, symbol: str, exchange: str) -> Optional[int]:
-        """Symbol ka instrument token lo"""
-        try:
-            instruments = self.kite.instruments(exchange)
-            for inst in instruments:
-                if inst["tradingsymbol"] == symbol:
-                    return inst["instrument_token"]
-            logger.warning(f"Token not found for {symbol}")
-            return None
-        except Exception as e:
-            logger.error(f"Token lookup error {symbol}: {e}")
-            return None
+        """Symbol ka instrument token lo (cached in RAM for millisecond resolution)"""
+        cache = self._ensure_token_cache(exchange)
+        tok = cache.get(symbol)
+        if tok:
+            return tok
+        logger.warning(f"Token not found in cache for {symbol}")
+        return None
 
     # ─────────────────────────────────────────────────────────
     # START / STOP
