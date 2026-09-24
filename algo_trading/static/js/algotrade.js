@@ -363,7 +363,12 @@ function renderStrategiesGrid(strategies) {
                         <span class="strat-icon">${icon}</span>
                         <div>
                             <div class="strat-name">${s.name}</div>
-                            <span class="badge-mini purple">${badge}</span>
+                            <div style="display:flex;align-items:center;gap:6px;margin-top:2px">
+                                <span class="badge-mini purple">${badge}</span>
+                                <button class="btn-strat-info" onclick="openAlgoStratAnalytics('${s.id}')" title="Strategy Performance & Win/Loss Analytics">
+                                    ℹ️ Info
+                                </button>
+                            </div>
                         </div>
                     </div>
                     <label class="algo-switch" title="Toggle Strategy Auto-Trading">
@@ -405,9 +410,14 @@ function renderStrategiesGrid(strategies) {
                     <div class="strat-signals-badge">
                         <span>🎯 Signals:</span> <strong>${signalsCount}</strong>
                     </div>
-                    <button class="btn btn-sm btn-grey" onclick="openAlgoStratModal('${s.id}')">
-                        ⚙️ Configure
-                    </button>
+                    <div style="display:flex;gap:6px">
+                        <button class="btn btn-sm btn-strat-info" onclick="openAlgoStratAnalytics('${s.id}')" title="Strategy Performance & Win/Loss Analytics">
+                            ℹ️ Info
+                        </button>
+                        <button class="btn btn-sm btn-grey" onclick="openAlgoStratModal('${s.id}')">
+                            ⚙️ Configure
+                        </button>
+                    </div>
                 </div>
             </div>
         `;
@@ -1111,4 +1121,129 @@ function escapeHtml(str) {
         .replace(/</g, '&lt;')
         .replace(/>/g, '&gt;')
         .replace(/"/g, '&quot;');
+}
+
+// ─── STRATEGY ANALYTICS & WIN/LOSS MODAL (1-6 DAYS) ────────────
+let _currentAnalyticsStratId = 'momentum_trend';
+let _currentAnalyticsDays = '1';
+
+async function openAlgoStratAnalytics(stratId) {
+    _currentAnalyticsStratId = stratId;
+    _currentAnalyticsDays = '1';
+
+    // Reset day pills to 1 Day active
+    const group = document.getElementById('algo-analytics-days-group');
+    if (group) {
+        group.querySelectorAll('.algo-day-pill').forEach(btn => {
+            btn.classList.remove('active');
+            if (btn.textContent.trim() === '1 Day') btn.classList.add('active');
+        });
+    }
+
+    const modal = document.getElementById('algo-strat-analytics-modal');
+    if (modal) modal.style.display = 'flex';
+
+    await fetchStrategyAnalytics(stratId, '1');
+}
+
+function closeAlgoStratAnalyticsModal() {
+    const modal = document.getElementById('algo-strat-analytics-modal');
+    if (modal) modal.style.display = 'none';
+}
+
+async function changeAnalyticsDays(days, btnElement) {
+    _currentAnalyticsDays = days;
+    const group = document.getElementById('algo-analytics-days-group');
+    if (group) {
+        group.querySelectorAll('.algo-day-pill').forEach(btn => btn.classList.remove('active'));
+    }
+    if (btnElement) btnElement.classList.add('active');
+
+    await fetchStrategyAnalytics(_currentAnalyticsStratId, days);
+}
+
+async function fetchStrategyAnalytics(stratId, days) {
+    try {
+        const tbody = document.getElementById('analytics-trades-tbody');
+        if (tbody) tbody.innerHTML = '<tr><td colspan="9" class="empty">Loading performance telemetry...</td></tr>';
+
+        const res = await fetch(`/api/algo/strategy_analytics?strat_id=${encodeURIComponent(stratId)}&days=${encodeURIComponent(days)}`);
+        const data = await res.json();
+
+        if (!data.success) {
+            showToast(data.error || 'Failed to load strategy analytics', 'error');
+            return;
+        }
+
+        const strat = data.strategy || {};
+        const summary = data.summary || {};
+        const trades = data.trades || [];
+
+        // Set Header details
+        setText('analytics-strat-icon', strat.icon || '📈');
+        setText('analytics-strat-name', `${strat.name} Performance`);
+        setText('analytics-strat-badge', `${strat.badge || 'Intraday'} • ${data.filter_label || '1 Day'}`);
+        setText('analytics-strat-desc', strat.desc || '');
+        setText('analytics-data-source', data.data_source || 'Live Telemetry');
+        setText('analytics-trades-count-badge', `${summary.total_trades || 0} Trades`);
+
+        // Set KPI Cards
+        const retPct = summary.total_return_pct || 0.0;
+        const retEl = document.getElementById('analytics-return-pct');
+        if (retEl) {
+            retEl.textContent = `${retPct >= 0 ? '+' : ''}${retPct.toFixed(2)}%`;
+            retEl.className = 'analytics-card-val ' + (retPct >= 0 ? 'green' : 'red');
+        }
+
+        const netPnl = summary.net_pnl || 0.0;
+        setText('analytics-net-pnl', `Net P&L: ${netPnl >= 0 ? '+₹' : '-₹'}${Math.abs(netPnl).toLocaleString('en-IN', {minimumFractionDigits: 2})}`);
+
+        setText('analytics-win-rate', `${(summary.win_rate_pct || 0).toFixed(1)}%`);
+        setText('analytics-win-count', `${summary.winning_trades || 0} Wins / ${summary.completed_trades || 0} Trades`);
+
+        setText('analytics-loss-rate', `${(summary.loss_rate_pct || 0).toFixed(1)}%`);
+        setText('analytics-loss-count', `${summary.losing_trades || 0} Losses / ${summary.completed_trades || 0} Trades`);
+
+        setText('analytics-avg-win', `+${(summary.avg_win_pct || 0).toFixed(2)}%`);
+        setText('analytics-max-win', `Best Win: +₹${(summary.max_win_pnl || 0).toLocaleString('en-IN')}`);
+
+        setText('analytics-avg-loss', `-${(summary.avg_loss_pct || 0).toFixed(2)}%`);
+        setText('analytics-max-loss', `Max Loss: ₹${(summary.max_loss_pnl || 0).toLocaleString('en-IN')}`);
+
+        setText('analytics-profit-factor', `${(summary.profit_factor || 0).toFixed(2)}x`);
+        setText('analytics-signals-count', `${summary.signals_count || summary.total_trades || 0} Total Signals`);
+
+        // Render Trades Table
+        if (tbody) {
+            if (trades.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="9" class="empty">No trades found for this strategy in the selected date range.</td></tr>';
+            } else {
+                tbody.innerHTML = trades.map(t => {
+                    const isWin = (t.status === 'WIN' || t.pnl > 0);
+                    const isActive = (t.status && t.status.includes('ACTIVE'));
+                    const pnlVal = t.pnl || 0;
+                    const retVal = t.return_pct || 0;
+                    const pnlClass = isActive ? 'yellow' : (isWin ? 'green' : 'red');
+                    const badgeClass = isActive ? 'badge-mini yellow' : (isWin ? 'badge-mini green' : 'badge-mini red');
+
+                    return `
+                        <tr>
+                            <td style="color:var(--text2);font-size:11px">${t.date || ''}</td>
+                            <td style="color:var(--text3);font-size:11px">${t.time || ''}</td>
+                            <td style="font-weight:700">${t.symbol || ''}</td>
+                            <td><span class="badge-mini ${t.side === 'BUY' ? 'green' : 'red'}">${t.side || 'BUY'}</span></td>
+                            <td>₹${(t.entry_price || 0).toFixed(2)}</td>
+                            <td>₹${(t.exit_price || 0).toFixed(2)}</td>
+                            <td class="${pnlClass}" style="font-weight:600">${retVal >= 0 ? '+' : ''}${retVal.toFixed(2)}%</td>
+                            <td class="${pnlClass}" style="font-weight:700">${pnlVal >= 0 ? '+₹' : '-₹'}${Math.abs(pnlVal).toFixed(2)}</td>
+                            <td><span class="${badgeClass}">${t.status}</span> <span style="font-size:10px;color:var(--text3)">${t.exit_reason || ''}</span></td>
+                        </tr>
+                    `;
+                }).join('');
+            }
+        }
+    } catch (e) {
+        console.error('Error fetching strategy analytics:', e);
+        showToast('Failed to load strategy performance: ' + e, 'error');
+    }
 }

@@ -834,6 +834,17 @@ def api_algo_equity():
     return jsonify(engine.get_equity_curve())
 
 
+@app.route("/api/algo/strategy_analytics")
+def api_algo_strategy_analytics():
+    """Returns detailed return % and win/loss statistics for a strategy over 1-6 days"""
+    engine = _state.get("algo_engine")
+    if not engine:
+        return jsonify({"success": False, "error": "Algo engine not initialized"})
+    strat_id = request.args.get("strat_id", "momentum_trend")
+    days = request.args.get("days", "1")
+    return jsonify(engine.get_strategy_analytics(strat_id=strat_id, days=days))
+
+
 # Legacy bot routes wired to algo engine
 @app.route("/api/bot/start", methods=["POST"])
 def api_bot_start():

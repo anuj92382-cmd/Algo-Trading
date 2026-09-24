@@ -22,6 +22,85 @@
             color: #ef4444;
             background: rgba(239, 68, 68, 0.15);
         }
+
+        /* Strategy Analytics Modal & Pills */
+        .algo-day-pill {
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            color: #94a3b8;
+            padding: 4px 11px;
+            border-radius: 6px;
+            font-size: 11px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.15s ease;
+        }
+        .algo-day-pill:hover {
+            background: rgba(59, 130, 246, 0.15);
+            color: #93c5fd;
+            border-color: rgba(59, 130, 246, 0.4);
+        }
+        .algo-day-pill.active {
+            background: #2563eb;
+            color: #ffffff;
+            border-color: #3b82f6;
+            box-shadow: 0 0 10px rgba(37, 99, 235, 0.4);
+        }
+        .algo-analytics-kpi-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 10px;
+        }
+        @media (max-width: 650px) {
+            .algo-analytics-kpi-grid {
+                grid-template-columns: repeat(2, 1fr);
+            }
+        }
+        .algo-analytics-card {
+            background: rgba(255, 255, 255, 0.03);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 8px;
+            padding: 10px 14px;
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+        }
+        .analytics-card-lbl {
+            font-size: 11px;
+            color: #94a3b8;
+            font-weight: 600;
+        }
+        .analytics-card-val {
+            font-size: 18px;
+            font-weight: 700;
+            color: #f1f5f9;
+        }
+        .analytics-card-val.green { color: #34d399; }
+        .analytics-card-val.red { color: #f87171; }
+        .analytics-card-val.yellow { color: #fbbf24; }
+        .analytics-card-sub {
+            font-size: 10px;
+            color: #64748b;
+        }
+        .btn-strat-info {
+            background: rgba(59, 130, 246, 0.12);
+            border: 1px solid rgba(59, 130, 246, 0.3);
+            color: #60a5fa;
+            border-radius: 5px;
+            padding: 2px 7px;
+            font-size: 11px;
+            font-weight: 600;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            transition: all 0.15s ease;
+        }
+        .btn-strat-info:hover {
+            background: rgba(59, 130, 246, 0.25);
+            border-color: #60a5fa;
+            color: #93c5fd;
+        }
     </style>
 </head>
 <body>
@@ -1818,6 +1897,113 @@
             </div>
         </div>
 
+        <!-- Strategy Performance & Win/Loss Analytics Modal (1-6 Days Filter) -->
+        <div id="algo-strat-analytics-modal" class="sc-modal" style="display:none">
+            <div class="sc-modal-box" style="max-width:780px">
+                <div class="sc-modal-header" style="display:flex;justify-content:space-between;align-items:center">
+                    <div style="display:flex;align-items:center;gap:12px">
+                        <span id="analytics-strat-icon" style="font-size:26px">📈</span>
+                        <div>
+                            <div style="display:flex;align-items:center;gap:8px">
+                                <h3 id="analytics-strat-name" style="margin:0;font-size:17px;font-weight:700">Strategy Performance</h3>
+                                <span class="badge-mini purple" id="analytics-strat-badge">Intraday</span>
+                            </div>
+                            <div id="analytics-strat-desc" style="font-size:11px;color:var(--text3);margin-top:2px">Strategy Return %, Win Rate &amp; Historical Signal Analytics</div>
+                        </div>
+                    </div>
+                    <button onclick="closeAlgoStratAnalyticsModal()" class="sc-modal-close">✕</button>
+                </div>
+
+                <div class="sc-modal-body" style="padding:16px 20px">
+                    <!-- Date Range Filter Selector -->
+                    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;flex-wrap:wrap;gap:10px;background:rgba(255,255,255,0.02);padding:10px 14px;border-radius:8px;border:1px solid rgba(255,255,255,0.06)">
+                        <div style="display:flex;align-items:center;gap:6px">
+                            <span style="font-size:14px">📅</span>
+                            <span style="font-size:12px;font-weight:600;color:var(--text2)">Date Range Filter:</span>
+                        </div>
+                        <div class="algo-pill-group" id="algo-analytics-days-group" style="display:flex;gap:6px;flex-wrap:wrap">
+                            <button class="algo-day-pill active" onclick="changeAnalyticsDays('1', this)">1 Day</button>
+                            <button class="algo-day-pill" onclick="changeAnalyticsDays('2', this)">2 Days</button>
+                            <button class="algo-day-pill" onclick="changeAnalyticsDays('3', this)">3 Days</button>
+                            <button class="algo-day-pill" onclick="changeAnalyticsDays('4', this)">4 Days</button>
+                            <button class="algo-day-pill" onclick="changeAnalyticsDays('5', this)">5 Days</button>
+                            <button class="algo-day-pill" onclick="changeAnalyticsDays('6', this)">6 Days</button>
+                            <button class="algo-day-pill" onclick="changeAnalyticsDays('all', this)">All Time</button>
+                        </div>
+                    </div>
+
+                    <!-- KPI Metric Cards Grid (6 cards) -->
+                    <div class="algo-analytics-kpi-grid">
+                        <div class="algo-analytics-card">
+                            <div class="analytics-card-lbl">🚀 Total Return %</div>
+                            <div class="analytics-card-val" id="analytics-return-pct">+0.00%</div>
+                            <div class="analytics-card-sub" id="analytics-net-pnl">Net P&amp;L: ₹0.00</div>
+                        </div>
+                        <div class="algo-analytics-card">
+                            <div class="analytics-card-lbl">🎯 Win Rate %</div>
+                            <div class="analytics-card-val green" id="analytics-win-rate">0.0%</div>
+                            <div class="analytics-card-sub" id="analytics-win-count">0 Wins / 0 Trades</div>
+                        </div>
+                        <div class="algo-analytics-card">
+                            <div class="analytics-card-lbl">🔻 Loss Rate %</div>
+                            <div class="analytics-card-val red" id="analytics-loss-rate">0.0%</div>
+                            <div class="analytics-card-sub" id="analytics-loss-count">0 Losses / 0 Trades</div>
+                        </div>
+                        <div class="algo-analytics-card">
+                            <div class="analytics-card-lbl">🟢 Avg Profit / Win</div>
+                            <div class="analytics-card-val green" id="analytics-avg-win">+0.00%</div>
+                            <div class="analytics-card-sub" id="analytics-max-win">Best: ₹0.00</div>
+                        </div>
+                        <div class="algo-analytics-card">
+                            <div class="analytics-card-lbl">🔴 Avg Loss / Trade</div>
+                            <div class="analytics-card-val red" id="analytics-avg-loss">-0.00%</div>
+                            <div class="analytics-card-sub" id="analytics-max-loss">Max Loss: ₹0.00</div>
+                        </div>
+                        <div class="algo-analytics-card">
+                            <div class="analytics-card-lbl">⚖️ Profit Factor</div>
+                            <div class="analytics-card-val yellow" id="analytics-profit-factor">0.00x</div>
+                            <div class="analytics-card-sub" id="analytics-signals-count">0 Total Signals</div>
+                        </div>
+                    </div>
+
+                    <!-- Signals & Executed Trades Table -->
+                    <div style="margin-top:18px">
+                        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+                            <div style="font-size:13px;font-weight:700;color:var(--text1);display:flex;align-items:center;gap:6px">
+                                <span>📋 Executed Signals &amp; Trade Records</span>
+                                <span class="badge-mini blue" id="analytics-trades-count-badge">0 Trades</span>
+                            </div>
+                            <div id="analytics-data-source" style="font-size:11px;color:var(--text3)">Live Telemetry</div>
+                        </div>
+                        <div class="table-wrap" style="max-height:270px;overflow-y:auto;border:1px solid rgba(255,255,255,0.06);border-radius:6px">
+                            <table style="width:100%;font-size:12px">
+                                <thead>
+                                    <tr>
+                                        <th>Date</th>
+                                        <th>Time</th>
+                                        <th>Symbol</th>
+                                        <th>Side</th>
+                                        <th>Entry ₹</th>
+                                        <th>Exit ₹</th>
+                                        <th>Return %</th>
+                                        <th>Net P&amp;L ₹</th>
+                                        <th>Result / Reason</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="analytics-trades-tbody">
+                                    <tr><td colspan="9" class="empty">No trades found for this strategy in this period.</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+                <div class="sc-modal-footer" style="padding:10px 20px;display:flex;justify-content:space-between;align-items:center;background:rgba(0,0,0,0.2)">
+                    <span style="font-size:11px;color:var(--text3)">Signals verified via institutional VWAP &amp; multi-factor confluence</span>
+                    <button class="btn btn-sm btn-grey" onclick="closeAlgoStratAnalyticsModal()">Close</button>
+                </div>
+            </div>
+        </div>
+
         <!-- Emergency Kill Switch Confirmation Modal -->
         <div id="algo-kill-modal" class="sc-modal" style="display:none">
             <div class="sc-modal-box" style="max-width:450px;border-top:4px solid var(--red)">
@@ -1898,6 +2084,6 @@
 <script src="/static/js/trade.js?v=2"></script>
 <script src="/static/js/paper.js?v=2"></script>
 <script src="/static/js/reversals.js?v=2"></script>
-<script src="/static/js/algotrade.js?v=8"></script>
+<script src="/static/js/algotrade.js?v=9"></script>
 </body>
 </html>
