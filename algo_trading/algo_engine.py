@@ -507,6 +507,7 @@ class AlgoEngine:
                     for k, v in data["strategies"].items():
                         if k in self.strategies:
                             self.strategies[k].update(v)
+                self.rebalance_strategy_capital()
                 self.closed_trades = data.get("closed_trades", [])
                 if "stats" in data:
                     self.stats.update(data["stats"])
@@ -1272,12 +1273,13 @@ class AlgoEngine:
                           f"Active position already open for {symbol}. Duplicate order rejected!")
                 return
 
-        # 1. Base capital allocation per trade:
-        # In auto_split mode, total trading capital is partitioned equally across max positions (e.g. ₹20,000 / 4 = ₹5,000 per trade)
-        if cap_mode == "auto_split":
-            cap_alloc = round(total_cap / max_pos, 2)
-        else:
-            cap_alloc = float(strat.get("capital_per_trade", 5000.0))
+        # 1. Logic-Based Strategy Capital Allocation:
+        # Each trading logic has its own dynamically allocated capital (total_capital / active_logics, or custom tuned)
+        strat_cap = float(strat.get("capital_per_trade", 0.0))
+        if strat_cap <= 0:
+            active_count = len([s for s in self.strategies.values() if s.get("enabled", True)])
+            strat_cap = round(total_cap / max(1, active_count), 2)
+        cap_alloc = strat_cap
 
         # 2. Strict Account Capital & Margin Protection:
         used_margin = sum(float(p.get("margin_used", 0.0) or 0.0) for p in self.active_positions.values())
@@ -1303,16 +1305,16 @@ class AlgoEngine:
 
         quantity = int(effective_buying_power / ltp)
         if quantity < 1:
-            if min_single_share_margin <= available_cap:
+            if min_single_share_margin <= available_cap and min_single_share_margin <= cap_alloc * 1.5:
                 quantity = 1
             else:
-                self._log("RMS", f"⛔ [INSUFFICIENT FUNDS] Cannot buy 1 Qty {symbol}: Required ₹{min_single_share_margin:,.2f} > Available ₹{available_cap:,.2f}")
+                self._log("RMS", f"⛔ [INSUFFICIENT FUNDS] Cannot buy 1 Qty {symbol}: Required ₹{min_single_share_margin:,.2f} > Allocated ₹{cap_alloc:,.2f} (Available ₹{available_cap:,.2f})")
                 return
 
         margin_req = (ltp * quantity) / leverage_mult
 
-        # Scale down quantity if margin exceeds available capital
-        while quantity > 1 and (margin_req > available_cap + 1.0):
+        # Scale down quantity if margin exceeds available capital OR allocated logic capital
+        while quantity > 1 and (margin_req > available_cap + 1.0 or margin_req > cap_alloc + 1.0):
             quantity -= 1
             margin_req = (ltp * quantity) / leverage_mult
 
@@ -1357,7 +1359,7 @@ class AlgoEngine:
                 except Exception as pe:
                     logger.warning(f"Paper portfolio order add warning: {pe}")
 
-            lev_info = f"(5X Margin: ₹{margin_req:,.2f} | Fund Used: ₹{margin_req+used_margin:,.0f}/₹{total_cap:,.0f})" if is_mis else f"(1X CNC: ₹{margin_req:,.2f} | Fund Used: ₹{margin_req+used_margin:,.0f}/₹{total_cap:,.0f})"
+            lev_info = f"(5X Margin: ₹{margin_req:,.2f} | Logic Cap: ₹{cap_alloc:,.2f} | Account: ₹{margin_req+used_margin:,.0f}/₹{total_cap:,.0f})" if is_mis else f"(1X CNC: ₹{margin_req:,.2f} | Logic Cap: ₹{cap_alloc:,.2f} | Account: ₹{margin_req+used_margin:,.0f}/₹{total_cap:,.0f})"
             self._log("ORDER", f"⚡ [AUTO {side}] EXECUTED: {quantity} Qty {symbol} @ ₹{ltp:.2f} {lev_info}",
                       f"T1: ₹{t1_price:.2f} (+{t1_pct}%, 50% Qty) | T2: ₹{t2_price:.2f} (+{t2_pct}%) | SL: ₹{sl_price:.2f} (-{sl_pct}%)")
 
@@ -1775,25 +1777,164 @@ class AlgoEngine:
                 "circuit_breaker_reason": self.risk_config.get("circuit_breaker_reason", ""),
             }
 
+    # ─────────────────────────────────────────────────────────────
+    # DYNAMIC CAPITAL ALLOCATION & REBALANCING ENGINE
+    # ─────────────────────────────────────────────────────────────
+
+    def rebalance_strategy_capital(self):
+        """
+        Dynamically balances trading capital across all active strategies/logics.
+        Rule: Total Capital / Active Logics Count.
+        Inactive strategies are allocated ₹0.0.
+        Guarantees that the sum of capital across active strategies strictly equals Total Capital.
+        """
+        total_cap = float(self.risk_config.get("total_capital", 20000.0))
+        active = [s for s in self.strategies.values() if s.get("enabled", True)]
+        if not active:
+            for s in self.strategies.values():
+                s["capital_per_trade"] = 0.0
+            return
+
+        current_sum = round(sum(float(s.get("capital_per_trade", 0.0)) for s in active), 2)
+        # Rebalance equally if sum doesn't match total_capital or any active strategy has 0 / invalid capital
+        if abs(current_sum - total_cap) > 1.0 or any(float(s.get("capital_per_trade", 0.0)) <= 0 for s in active):
+            base_share = round(total_cap / len(active), 2)
+            remainder = round(total_cap - (base_share * len(active)), 2)
+            for i, s in enumerate(active):
+                s["capital_per_trade"] = round(base_share + (remainder if i == 0 else 0.0), 2)
+
+        for s in self.strategies.values():
+            if not s.get("enabled", True):
+                s["capital_per_trade"] = 0.0
+
+    def adjust_strategy_capital(self, target_id: str, new_cap: float):
+        """
+        Adjusts a specific strategy's capital.
+        Any increase or decrease (+/- Delta) is deducted or added EQUALLY across all other active strategies.
+        Guarantees: Total Capital is strictly preserved.
+        """
+        target = self.strategies.get(target_id)
+        if not target or not target.get("enabled", True):
+            return
+
+        total_cap = float(self.risk_config.get("total_capital", 20000.0))
+        active_others = [s for s in self.strategies.values() if s.get("enabled", True) and s.get("id") != target_id]
+        if not active_others:
+            target["capital_per_trade"] = total_cap
+            return
+
+        min_cap = 100.0
+        max_cap = max(min_cap, round(total_cap - (len(active_others) * min_cap), 2))
+        new_cap = max(min_cap, min(max_cap, round(float(new_cap), 2)))
+
+        old_cap = float(target.get("capital_per_trade", 0.0))
+        delta = round(new_cap - old_cap, 2)
+        if abs(delta) < 0.01:
+            return
+
+        # Deduct / Add delta equally across remaining active strategies
+        deduct_per_other = round(delta / len(active_others), 2)
+        target["capital_per_trade"] = new_cap
+
+        for s in active_others:
+            s["capital_per_trade"] = max(min_cap, round(float(s.get("capital_per_trade", 0.0)) - deduct_per_other, 2))
+
+        # Precision correction to ensure exact sum equals total_cap
+        current_total = round(target["capital_per_trade"] + sum(float(s["capital_per_trade"]) for s in active_others), 2)
+        diff = round(total_cap - current_total, 2)
+        active_others[0]["capital_per_trade"] = round(active_others[0]["capital_per_trade"] + diff, 2)
+
+    def toggle_strategy_active(self, strat_id: str, is_enabled: bool):
+        """
+        Toggles a strategy Active or Inactive:
+        - When DISABLED: Its capital is released and distributed EQUALLY among remaining active strategies.
+        - When ENABLED: It is granted its fair share, drawn EQUALLY from existing active strategies.
+        Guarantees: Total Capital is strictly preserved.
+        """
+        target = self.strategies.get(strat_id)
+        if not target:
+            return
+
+        was_enabled = target.get("enabled", True)
+        target["enabled"] = is_enabled
+        total_cap = float(self.risk_config.get("total_capital", 20000.0))
+
+        if was_enabled and not is_enabled:
+            # Releasing capital to remaining active strategies
+            released = float(target.get("capital_per_trade", 0.0))
+            target["capital_per_trade"] = 0.0
+            active = [s for s in self.strategies.values() if s.get("enabled", True)]
+            if active:
+                share = round(released / len(active), 2)
+                rem = round(released - (share * len(active)), 2)
+                for i, s in enumerate(active):
+                    s["capital_per_trade"] = round(float(s.get("capital_per_trade", 0.0)) + share + (rem if i == 0 else 0.0), 2)
+                tot = round(sum(float(s["capital_per_trade"]) for s in active), 2)
+                d = round(total_cap - tot, 2)
+                active[0]["capital_per_trade"] = round(active[0]["capital_per_trade"] + d, 2)
+
+        elif not was_enabled and is_enabled:
+            # Granting fair share to newly activated strategy
+            active = [s for s in self.strategies.values() if s.get("enabled", True)]
+            active_others = [s for s in active if s.get("id") != strat_id]
+            if not active_others:
+                target["capital_per_trade"] = total_cap
+            else:
+                target_share = round(total_cap / len(active), 2)
+                deduct_each = round(target_share / len(active_others), 2)
+                for s in active_others:
+                    s["capital_per_trade"] = max(100.0, round(float(s.get("capital_per_trade", 0.0)) - deduct_each, 2))
+                target["capital_per_trade"] = target_share
+                tot = round(sum(float(s["capital_per_trade"]) for s in active), 2)
+                d = round(total_cap - tot, 2)
+                active_others[0]["capital_per_trade"] = round(active_others[0]["capital_per_trade"] + d, 2)
+
+    def rebalance_on_total_capital_change(self, new_total: float, old_total: float):
+        """Scales active strategies proportionally when total capital changes in RMS."""
+        active = [s for s in self.strategies.values() if s.get("enabled", True)]
+        if not active:
+            return
+        if old_total <= 0:
+            self.rebalance_strategy_capital()
+            return
+        for s in active:
+            ratio = float(s.get("capital_per_trade", 0.0)) / old_total
+            s["capital_per_trade"] = round(new_total * ratio, 2)
+        tot = round(sum(float(s["capital_per_trade"]) for s in active), 2)
+        d = round(new_total - tot, 2)
+        active[0]["capital_per_trade"] = round(active[0]["capital_per_trade"] + d, 2)
+
     def get_config(self) -> dict:
-        """Returns strategy parameters and RMS risk settings."""
+        """Returns strategy parameters and RMS risk settings with live balanced capital summary."""
         with self._lock:
+            self.rebalance_strategy_capital()
+            active_count = len([s for s in self.strategies.values() if s.get("enabled", True)])
+            total_cap = float(self.risk_config.get("total_capital", 20000.0))
             return {
                 "status": self.status,
                 "mode": self.mode,
                 "universe": self.universe,
                 "risk_config": self.risk_config,
                 "strategies": list(self.strategies.values()),
+                "capital_summary": {
+                    "total_capital": total_cap,
+                    "active_logics_count": active_count,
+                    "capital_per_logic": round(total_cap / max(1, active_count), 2),
+                }
             }
 
     def update_config(self, data: dict) -> dict:
-        """Update strategy settings or RMS limits from client."""
+        """Update strategy settings or RMS limits from client with dynamic rebalancing."""
         with self._lock:
             if "universe" in data:
                 self.universe = data["universe"]
 
             if "risk_config" in data:
+                old_cap = float(self.risk_config.get("total_capital", 20000.0))
                 self.risk_config.update(data["risk_config"])
+                new_cap = float(self.risk_config.get("total_capital", 20000.0))
+                if abs(new_cap - old_cap) > 0.01:
+                    self.rebalance_on_total_capital_change(new_cap, old_cap)
                 # Reset circuit breaker if requested
                 if data["risk_config"].get("circuit_breaker_hit") is False:
                     self.risk_config["circuit_breaker_hit"] = False
@@ -1803,11 +1944,40 @@ class AlgoEngine:
                 for s_data in data["strategies"]:
                     sid = s_data.get("id")
                     if sid in self.strategies:
-                        self.strategies[sid].update(s_data)
+                        curr_s = self.strategies[sid]
+                        old_enabled = curr_s.get("enabled", True)
+                        new_enabled = s_data.get("enabled", old_enabled)
+                        old_cap = float(curr_s.get("capital_per_trade", 0.0))
+                        new_cap = s_data.get("capital_per_trade")
 
+                        # Update other configuration attributes
+                        for k, v in s_data.items():
+                            if k not in ("enabled", "capital_per_trade"):
+                                curr_s[k] = v
+
+                        # Handle active / inactive toggle
+                        if old_enabled != new_enabled:
+                            self.toggle_strategy_active(sid, new_enabled)
+                        elif new_cap is not None and abs(float(new_cap) - old_cap) > 0.5:
+                            # Handle manual capital adjustment (+/- Delta)
+                            self.adjust_strategy_capital(sid, float(new_cap))
+
+            self.rebalance_strategy_capital()
             self._save_state()
-            self._log("INFO", "⚙️ Algo Trade Configuration updated.")
-            return {"success": True, "message": "Config updated successfully"}
+            self._log("INFO", "⚙️ Strategy Configuration updated & dynamic capital rebalanced.")
+            active_count = len([s for s in self.strategies.values() if s.get("enabled", True)])
+            total_cap = float(self.risk_config.get("total_capital", 20000.0))
+            return {
+                "success": True,
+                "message": "Config updated and strategy capital rebalanced successfully",
+                "strategies": list(self.strategies.values()),
+                "risk_config": self.risk_config,
+                "capital_summary": {
+                    "total_capital": total_cap,
+                    "active_logics_count": active_count,
+                    "capital_per_logic": round(total_cap / max(1, active_count), 2),
+                }
+            }
 
     def get_active_positions(self) -> List[dict]:
         """Returns active positions with live P&L and trailing SL."""

@@ -327,6 +327,15 @@ async function loadAlgoConfig() {
                 _algoStrategiesCache = {};
                 data.strategies.forEach(s => _algoStrategiesCache[s.id] = s);
                 renderStrategiesGrid(data.strategies);
+
+                // Live dynamic capital summary in Quantitative Strategy Engine header
+                const totalCap = (data.risk_config?.total_capital) || 20000;
+                const activeStrats = data.strategies.filter(s => s.enabled !== false);
+                const activeCount = activeStrats.length;
+                const shareCap = activeCount > 0 ? (totalCap / activeCount) : 0;
+                setText('algo-summary-total-cap', `₹${totalCap.toLocaleString('en-IN')}`);
+                setText('algo-summary-active-count', activeCount);
+                setText('algo-summary-share-cap', `₹${shareCap.toLocaleString('en-IN', {maximumFractionDigits: 2})}`);
             }
         }
     } catch (e) {
@@ -343,6 +352,8 @@ function renderStrategiesGrid(strategies) {
         return;
     }
 
+    const totalCap = (_algoConfigCache?.risk_config?.total_capital) || 20000;
+
     grid.innerHTML = strategies.map(s => {
         const enabled = s.enabled !== false;
         const icon = s.icon || '📈';
@@ -351,7 +362,10 @@ function renderStrategiesGrid(strategies) {
         const target2Pct = s.target_2_pct != null ? s.target_2_pct : (s.target_pct || 2.0);
         const slPct = s.sl_pct || 0.8;
         const trailPct = s.trailing_sl_pct || 0.3;
-        const cap = (s.capital_per_trade || 20000).toLocaleString('en-IN');
+        const capNum = s.capital_per_trade || 0;
+        const cap = enabled ? (Math.round(capNum)).toLocaleString('en-IN') : '0';
+        const capPct = (enabled && totalCap > 0) ? ((capNum / totalCap) * 100).toFixed(0) : '0';
+        const capDisplay = enabled ? `₹${cap} (${capPct}%)` : `<span style="color:var(--text3);font-size:11px">₹0 (Inactive)</span>`;
         const prod = s.product || 'MIS';
         const isMis = (prod === 'MIS');
         const signalsCount = s.signals_count || 0;
@@ -402,7 +416,7 @@ function renderStrategiesGrid(strategies) {
                     </div>
                     <div class="strat-param">
                         <span class="param-lbl">Capital / Trade</span>
-                        <span class="param-val">₹${cap}</span>
+                        <span class="param-val ${enabled ? 'cyan' : ''}">${capDisplay}</span>
                     </div>
                 </div>
 
@@ -451,6 +465,7 @@ async function toggleStrategyState(stratId, isEnabled) {
         const data = await res.json();
         if (data.success) {
             showToast(`${_algoStrategiesCache[stratId]?.name || 'Strategy'} ${isEnabled ? 'ENABLED' : 'DISABLED'} for Auto Trading`, 'info');
+            loadAlgoConfig();
         }
     } catch (e) {
         showToast('Failed to toggle strategy', 'error');
@@ -461,6 +476,12 @@ async function toggleStrategyState(stratId, isEnabled) {
 function openAlgoStratModal(stratId) {
     const s = _algoStrategiesCache[stratId];
     if (!s) return;
+
+    const totalCap = (_algoConfigCache?.risk_config?.total_capital) || 20000;
+    const activeStrats = Object.values(_algoStrategiesCache).filter(st => st.enabled !== false);
+    const activeCount = Math.max(1, activeStrats.length);
+    const fairShare = totalCap / activeCount;
+    const currentCap = (s.capital_per_trade != null && s.capital_per_trade > 0) ? Math.round(s.capital_per_trade) : Math.round(fairShare);
 
     setVal('algo-modal-strat-id', s.id);
     setText('algo-modal-strat-title', `${s.name} Configuration`);
@@ -473,7 +494,8 @@ function openAlgoStratModal(stratId) {
     setVal('algo-modal-target2-pct', s.target_2_pct != null ? s.target_2_pct : 2.0);
     setVal('algo-modal-sl-pct', s.sl_pct || 0.8);
     setVal('algo-modal-trail-pct', s.trailing_sl_pct || 0.3);
-    setVal('algo-modal-capital', s.capital_per_trade || 20000);
+    setVal('algo-modal-capital', currentCap);
+    setText('modal-fair-share', `₹${Math.round(fairShare).toLocaleString('en-IN')}`);
     setVal('algo-modal-product', s.product || 'MIS');
     setVal('algo-modal-side', s.side || 'BOTH');
 
@@ -492,6 +514,7 @@ async function saveAlgoStratModal() {
 
     const t1Pct = parseFloat(document.getElementById('algo-modal-target1-pct').value) || 1.0;
     const t2Pct = parseFloat(document.getElementById('algo-modal-target2-pct').value) || 2.0;
+    const stratCap = parseFloat(document.getElementById('algo-modal-capital').value) || 2000;
 
     const payload = {
         id: stratId,
@@ -502,7 +525,7 @@ async function saveAlgoStratModal() {
         target_pct: t2Pct,
         sl_pct: parseFloat(document.getElementById('algo-modal-sl-pct').value) || 0.8,
         trailing_sl_pct: parseFloat(document.getElementById('algo-modal-trail-pct').value) || 0.3,
-        capital_per_trade: parseFloat(document.getElementById('algo-modal-capital').value) || 20000,
+        capital_per_trade: stratCap,
         product: document.getElementById('algo-modal-product').value,
         side: document.getElementById('algo-modal-side').value,
     };

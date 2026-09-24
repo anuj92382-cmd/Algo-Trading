@@ -1659,10 +1659,17 @@
             </div>
 
             <!-- 4. QUANTITATIVE STRATEGIES GRID -->
-            <div class="algo-section-header">
+            <div class="algo-section-header" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px">
                 <div class="algo-section-title">
                     🤖 <strong>Quantitative Strategy Engine</strong>
                     <span class="algo-section-sub">Enable/Disable strategies &amp; customize parameters for auto buy/sell</span>
+                </div>
+                <div id="algo-strat-capital-summary" style="display:flex;align-items:center;gap:10px;font-size:12px;background:rgba(15,23,42,0.85);border:1px solid rgba(59,130,246,0.3);border-radius:20px;padding:5px 14px;box-shadow:0 2px 8px rgba(0,0,0,0.3)">
+                    <span>💰 Total Capital: <strong id="algo-summary-total-cap" style="color:#60a5fa">₹20,000</strong></span>
+                    <span style="color:rgba(148,163,184,0.3)">|</span>
+                    <span>⚡ Active Logics: <strong id="algo-summary-active-count" style="color:#34d399">7</strong></span>
+                    <span style="color:rgba(148,163,184,0.3)">|</span>
+                    <span>⚖️ Share / Logic: <strong id="algo-summary-share-cap" style="color:#38bdf8">₹2,857.14</strong></span>
                 </div>
             </div>
 
@@ -1867,8 +1874,13 @@
 
                         <div class="algo-modal-field">
                             <label>Capital Allocation per Trade (₹)</label>
-                            <input type="number" id="algo-modal-capital" class="ctrl-input" step="5000" min="5000" value="20000">
-                            <small class="algo-field-hint">With 5X leverage in MIS, effective buying power = 5X</small>
+                            <input type="number" id="algo-modal-capital" class="ctrl-input" step="100" min="100" value="2857">
+                            <small class="algo-field-hint" id="algo-modal-capital-hint">
+                                ⚖️ Fair Share: <span id="modal-fair-share">₹2,857</span> | With 5X leverage in MIS, buying power = 5X
+                            </small>
+                            <div style="font-size:11px;color:#94a3b8;margin-top:3px;line-height:1.4">
+                                💡 <em>Note: Is strategy ka capital badhane ya ghatane par bacha hua farak (Difference) baaki sabhi active strategies me se barabar (equally) adjust ho jayega.</em>
+                            </div>
                         </div>
 
                         <div class="algo-modal-field">
@@ -2084,6 +2096,6 @@
 <script src="/static/js/trade.js?v=2"></script>
 <script src="/static/js/paper.js?v=2"></script>
 <script src="/static/js/reversals.js?v=2"></script>
-<script src="/static/js/algotrade.js?v=9"></script>
+<script src="/static/js/algotrade.js?v=10"></script>
 </body>
 </html>
