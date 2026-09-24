@@ -7,10 +7,15 @@ Sabhi settings yahan se control hoti hain
 import os
 import pytz
 from datetime import time
+from pathlib import Path
 from dotenv import load_dotenv
 
-# .env file load karo
-load_dotenv()
+# .env file load karo (explicit path to algo_trading/.env or root .env)
+env_path = Path(__file__).resolve().parent / ".env"
+if env_path.exists():
+    load_dotenv(dotenv_path=env_path, override=True)
+else:
+    load_dotenv(override=True)
 
 # ============================================================
 # API CREDENTIALS

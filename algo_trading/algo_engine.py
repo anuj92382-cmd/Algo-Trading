@@ -31,9 +31,10 @@ if pkg_dir not in sys.path:
     sys.path.insert(0, pkg_dir)
 
 try:
-    from config import TRADING_MODE
+    from config import TRADING_MODE, TOTAL_CAPITAL
 except Exception:
     TRADING_MODE = os.getenv("TRADING_MODE", "PAPER")
+    TOTAL_CAPITAL = float(os.getenv("TOTAL_CAPITAL", 2000000.0))
 
 logger = logging.getLogger("algo_engine")
 IST = pytz.timezone("Asia/Kolkata")
@@ -262,7 +263,7 @@ class AlgoEngine:
 
         # Risk Management Settings (RMS)
         self.risk_config = {
-            "total_capital": 20000.0,          # 💼 Total Trading Capital (Max Portfolio Budget)
+            "total_capital": float(TOTAL_CAPITAL) if TOTAL_CAPITAL else 2000000.0,  # 💼 Total Trading Capital from .env
             "capital_mode": "auto_split",      # "auto_split" (total_capital / max_positions) or "fixed"
             "max_daily_loss": 5000.0,         # Bot halts if loss exceeds ₹5,000
             "max_daily_profit": 15000.0,       # Bot locks profits at ₹15,000
@@ -501,7 +502,12 @@ class AlgoEngine:
                 self.risk_config.setdefault("min_stock_price", 50.0)
                 self.risk_config.setdefault("max_stock_price", 3000.0)
                 self.risk_config.setdefault("min_market_cap_m", 100.0)
-                self.risk_config.setdefault("total_capital", 20000.0)
+                env_cap = float(TOTAL_CAPITAL) if TOTAL_CAPITAL else 2000000.0
+                # Synchronize with .env TOTAL_CAPITAL
+                if env_cap and (self.risk_config.get("total_capital") != env_cap):
+                    logger.info(f"Synchronizing total_capital from .env: ₹{env_cap:,.2f} (was ₹{self.risk_config.get('total_capital', 0):,.2f})")
+                    self.risk_config["total_capital"] = env_cap
+                self.risk_config.setdefault("total_capital", env_cap)
                 self.risk_config.setdefault("capital_mode", "auto_split")
                 if "strategies" in data:
                     for k, v in data["strategies"].items():
@@ -1025,7 +1031,7 @@ class AlgoEngine:
         evaluated_count = len(quotes_data)
         active_symbols = {p["symbol"] for p in self.active_positions.values()}
 
-        total_cap = float(self.risk_config.get("total_capital", 20000.0))
+        total_cap = float(self.risk_config.get("total_capital", TOTAL_CAPITAL or 2000000.0))
         used_margin = sum(float(p.get("margin_used", 0.0) or 0.0) for p in self.active_positions.values())
         if used_margin >= total_cap:
             return 0
@@ -1255,7 +1261,7 @@ class AlgoEngine:
         product = strat.get("product", "MIS").upper()
 
         # Calculate position sizing with Total Capital Protection & Auto-Split
-        total_cap = float(self.risk_config.get("total_capital", 20000.0))
+        total_cap = float(self.risk_config.get("total_capital", TOTAL_CAPITAL or 2000000.0))
         max_pos = max(1, int(self.risk_config.get("max_open_positions", 4)))
         cap_mode = self.risk_config.get("capital_mode", "auto_split")
 
@@ -1788,7 +1794,7 @@ class AlgoEngine:
         Inactive strategies are allocated ₹0.0.
         Guarantees that the sum of capital across active strategies strictly equals Total Capital.
         """
-        total_cap = float(self.risk_config.get("total_capital", 20000.0))
+        total_cap = float(self.risk_config.get("total_capital", TOTAL_CAPITAL or 2000000.0))
         active = [s for s in self.strategies.values() if s.get("enabled", True)]
         if not active:
             for s in self.strategies.values():
@@ -1817,7 +1823,7 @@ class AlgoEngine:
         if not target or not target.get("enabled", True):
             return
 
-        total_cap = float(self.risk_config.get("total_capital", 20000.0))
+        total_cap = float(self.risk_config.get("total_capital", TOTAL_CAPITAL or 2000000.0))
         active_others = [s for s in self.strategies.values() if s.get("enabled", True) and s.get("id") != target_id]
         if not active_others:
             target["capital_per_trade"] = total_cap
@@ -1857,7 +1863,7 @@ class AlgoEngine:
 
         was_enabled = target.get("enabled", True)
         target["enabled"] = is_enabled
-        total_cap = float(self.risk_config.get("total_capital", 20000.0))
+        total_cap = float(self.risk_config.get("total_capital", TOTAL_CAPITAL or 2000000.0))
 
         if was_enabled and not is_enabled:
             # Releasing capital to remaining active strategies
@@ -1909,7 +1915,7 @@ class AlgoEngine:
         with self._lock:
             self.rebalance_strategy_capital()
             active_count = len([s for s in self.strategies.values() if s.get("enabled", True)])
-            total_cap = float(self.risk_config.get("total_capital", 20000.0))
+            total_cap = float(self.risk_config.get("total_capital", TOTAL_CAPITAL or 2000000.0))
             return {
                 "status": self.status,
                 "mode": self.mode,
@@ -1930,9 +1936,9 @@ class AlgoEngine:
                 self.universe = data["universe"]
 
             if "risk_config" in data:
-                old_cap = float(self.risk_config.get("total_capital", 20000.0))
+                old_cap = float(self.risk_config.get("total_capital", TOTAL_CAPITAL or 2000000.0))
                 self.risk_config.update(data["risk_config"])
-                new_cap = float(self.risk_config.get("total_capital", 20000.0))
+                new_cap = float(self.risk_config.get("total_capital", TOTAL_CAPITAL or 2000000.0))
                 if abs(new_cap - old_cap) > 0.01:
                     self.rebalance_on_total_capital_change(new_cap, old_cap)
                 # Reset circuit breaker if requested
@@ -1966,7 +1972,7 @@ class AlgoEngine:
             self._save_state()
             self._log("INFO", "⚙️ Strategy Configuration updated & dynamic capital rebalanced.")
             active_count = len([s for s in self.strategies.values() if s.get("enabled", True)])
-            total_cap = float(self.risk_config.get("total_capital", 20000.0))
+            total_cap = float(self.risk_config.get("total_capital", TOTAL_CAPITAL or 2000000.0))
             return {
                 "success": True,
                 "message": "Config updated and strategy capital rebalanced successfully",
@@ -2022,7 +2028,7 @@ class AlgoEngine:
             strat_badge = strat.get("badge", "Intraday")
             strat_icon = strat.get("icon", "🤖")
             strat_desc = strat.get("desc", "")
-            cap_per_trade = float(strat.get("capital_per_trade", self.risk_config.get("total_capital", 20000.0) / max(1, self.risk_config.get("max_open_positions", 4))))
+            cap_per_trade = float(strat.get("capital_per_trade", self.risk_config.get("total_capital", TOTAL_CAPITAL or 2000000.0) / max(1, self.risk_config.get("max_open_positions", 4))))
 
             # Determine filter window in seconds
             now_ts = time.time()

@@ -305,7 +305,7 @@ async function loadAlgoConfig() {
         if (data) {
             _algoConfigCache = data;
             const rc = data.risk_config || {};
-            const totalCap = rc.total_capital || 20000;
+            const totalCap = rc.total_capital || 2000000;
 
             // Universe
             if (data.universe) {
@@ -315,7 +315,7 @@ async function loadAlgoConfig() {
 
             // RMS Fields
             if (data.risk_config) {
-                setVal('algo-rms-total-capital', rc.total_capital || 20000);
+                setVal('algo-rms-total-capital', rc.total_capital || 2000000);
                 setVal('algo-rms-max-loss', rc.max_daily_loss || 5000);
                 setVal('algo-rms-max-profit', rc.max_daily_profit || 15000);
                 setVal('algo-rms-max-positions', rc.max_open_positions || 4);
@@ -355,7 +355,7 @@ function renderStrategiesGrid(strategies, totalCap) {
         return;
     }
 
-    const safeTotalCap = totalCap || (_algoConfigCache && _algoConfigCache.risk_config && _algoConfigCache.risk_config.total_capital) || 20000;
+    const safeTotalCap = totalCap || (_algoConfigCache && _algoConfigCache.risk_config && _algoConfigCache.risk_config.total_capital) || 2000000;
 
     grid.innerHTML = strategies.map(s => {
         const enabled = s.enabled !== false;
@@ -480,7 +480,7 @@ function openAlgoStratModal(stratId) {
     const s = _algoStrategiesCache[stratId];
     if (!s) return;
 
-    const totalCap = (_algoConfigCache && _algoConfigCache.risk_config && _algoConfigCache.risk_config.total_capital) ? _algoConfigCache.risk_config.total_capital : 20000;
+    const totalCap = (_algoConfigCache && _algoConfigCache.risk_config && _algoConfigCache.risk_config.total_capital) ? _algoConfigCache.risk_config.total_capital : 2000000;
     const activeStrats = Object.values(_algoStrategiesCache).filter(st => st.enabled !== false);
     const activeCount = Math.max(1, activeStrats.length);
     const fairShare = totalCap / activeCount;
@@ -556,7 +556,7 @@ async function saveAlgoStratModal() {
 // ─── 6. RMS RISK CONTROLS SAVING ──────────────────────────────
 async function saveAlgoRMS() {
     const universe = document.getElementById('algo-universe-select').value;
-    const totalCap = parseFloat(document.getElementById('algo-rms-total-capital') ? document.getElementById('algo-rms-total-capital').value : 20000) || 20000;
+    const totalCap = parseFloat(document.getElementById('algo-rms-total-capital') ? document.getElementById('algo-rms-total-capital').value : 2000000) || 2000000;
     const maxLoss = parseFloat(document.getElementById('algo-rms-max-loss').value) || 5000;
     const maxProfit = parseFloat(document.getElementById('algo-rms-max-profit').value) || 15000;
     const maxPos = parseInt(document.getElementById('algo-rms-max-positions').value) || 4;
@@ -602,7 +602,7 @@ function updateCapitalSplitHint() {
     const hintEl = document.getElementById('algo-rms-cap-split-hint');
     if (!hintEl) return;
 
-    const total = parseFloat(capInput ? capInput.value : 20000) || 20000;
+    const total = parseFloat(capInput ? capInput.value : 2000000) || 2000000;
     const maxPos = parseInt(posInput ? posInput.value : 4) || 4;
     const perStock = Math.round(total / maxPos);
 
