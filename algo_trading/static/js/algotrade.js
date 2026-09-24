@@ -14,6 +14,7 @@
 let _algoPollInterval = null;
 let _algoCurrentFilter = 'ALL';
 let _algoStrategiesCache = {};
+let _algoConfigCache = null;
 let _algoLastLogCount = 0;
 
 // ─── INITIALIZATION ──────────────────────────────────────────
@@ -302,6 +303,10 @@ async function loadAlgoConfig() {
         const res = await fetch('/api/algo/config');
         const data = await res.json();
         if (data) {
+            _algoConfigCache = data;
+            const rc = data.risk_config || {};
+            const totalCap = rc.total_capital || 20000;
+
             // Universe
             if (data.universe) {
                 const uSel = document.getElementById('algo-universe-select');
@@ -310,7 +315,6 @@ async function loadAlgoConfig() {
 
             // RMS Fields
             if (data.risk_config) {
-                const rc = data.risk_config;
                 setVal('algo-rms-total-capital', rc.total_capital || 20000);
                 setVal('algo-rms-max-loss', rc.max_daily_loss || 5000);
                 setVal('algo-rms-max-profit', rc.max_daily_profit || 15000);
@@ -326,10 +330,9 @@ async function loadAlgoConfig() {
             if (data.strategies) {
                 _algoStrategiesCache = {};
                 data.strategies.forEach(s => _algoStrategiesCache[s.id] = s);
-                renderStrategiesGrid(data.strategies);
+                renderStrategiesGrid(data.strategies, totalCap);
 
                 // Live dynamic capital summary in Quantitative Strategy Engine header
-                const totalCap = (data.risk_config?.total_capital) || 20000;
                 const activeStrats = data.strategies.filter(s => s.enabled !== false);
                 const activeCount = activeStrats.length;
                 const shareCap = activeCount > 0 ? (totalCap / activeCount) : 0;
@@ -343,7 +346,7 @@ async function loadAlgoConfig() {
     }
 }
 
-function renderStrategiesGrid(strategies) {
+function renderStrategiesGrid(strategies, totalCap) {
     const grid = document.getElementById('algo-strategies-grid');
     if (!grid) return;
 
@@ -352,7 +355,7 @@ function renderStrategiesGrid(strategies) {
         return;
     }
 
-    const totalCap = (_algoConfigCache?.risk_config?.total_capital) || 20000;
+    const safeTotalCap = totalCap || (_algoConfigCache && _algoConfigCache.risk_config && _algoConfigCache.risk_config.total_capital) || 20000;
 
     grid.innerHTML = strategies.map(s => {
         const enabled = s.enabled !== false;
@@ -364,7 +367,7 @@ function renderStrategiesGrid(strategies) {
         const trailPct = s.trailing_sl_pct || 0.3;
         const capNum = s.capital_per_trade || 0;
         const cap = enabled ? (Math.round(capNum)).toLocaleString('en-IN') : '0';
-        const capPct = (enabled && totalCap > 0) ? ((capNum / totalCap) * 100).toFixed(0) : '0';
+        const capPct = (enabled && safeTotalCap > 0) ? ((capNum / safeTotalCap) * 100).toFixed(0) : '0';
         const capDisplay = enabled ? `₹${cap} (${capPct}%)` : `<span style="color:var(--text3);font-size:11px">₹0 (Inactive)</span>`;
         const prod = s.product || 'MIS';
         const isMis = (prod === 'MIS');
@@ -477,7 +480,7 @@ function openAlgoStratModal(stratId) {
     const s = _algoStrategiesCache[stratId];
     if (!s) return;
 
-    const totalCap = (_algoConfigCache?.risk_config?.total_capital) || 20000;
+    const totalCap = (_algoConfigCache && _algoConfigCache.risk_config && _algoConfigCache.risk_config.total_capital) ? _algoConfigCache.risk_config.total_capital : 20000;
     const activeStrats = Object.values(_algoStrategiesCache).filter(st => st.enabled !== false);
     const activeCount = Math.max(1, activeStrats.length);
     const fairShare = totalCap / activeCount;
