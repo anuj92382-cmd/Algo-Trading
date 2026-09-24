@@ -240,6 +240,7 @@ class AlgoEngine:
         self.next_scan_countdown = 15
         self._worker_thread: Optional[threading.Thread] = None
         self._running_flag = False
+        self._scan_lock = threading.Lock()  # Mutex to prevent duplicate concurrent scans
 
         # Live Terminal Logs (Ring buffer of last 300 logs)
         self.logs = deque(maxlen=300)
@@ -918,6 +919,15 @@ class AlgoEngine:
         evaluates quantitative strategies, verifies 60%+ Win Rate, and auto-executes.
         Returns the number of symbols evaluated.
         """
+        if not self._scan_lock.acquire(blocking=False):
+            logger.debug("Scan already executing. Skipping concurrent trigger.")
+            return 0
+        try:
+            return self._scan_and_execute_signals_internal()
+        finally:
+            self._scan_lock.release()
+
+    def _scan_and_execute_signals_internal(self) -> int:
         t_start = time.perf_counter()
         max_open = int(self.risk_config.get("max_open_positions", 4))
         if len(self.active_positions) >= max_open:
@@ -1240,6 +1250,14 @@ class AlgoEngine:
                       f"Active positions ({len(self.active_positions)}/{max_pos}) already at max limit. Order rejected!")
             return
 
+        # 0b. Strict Duplicate Position Protection (Prevent duplicate orders on same stock)
+        with self._lock:
+            existing_symbols = {p["symbol"] for p in self.active_positions.values()}
+            if symbol in existing_symbols:
+                self._log("RMS", f"⛔ [DUPLICATE BLOCKED] Position for {symbol} already exists",
+                          f"Active position already open for {symbol}. Duplicate order rejected!")
+                return
+
         # 1. Base capital allocation per trade:
         # In auto_split mode, total trading capital is partitioned equally across max positions (e.g. ₹20,000 / 4 = ₹5,000 per trade)
         if cap_mode == "auto_split":
@@ -1357,43 +1375,44 @@ class AlgoEngine:
                 return
 
         # Register in Active Positions
-        pos_id = f"POS_{symbol}_{int(time.time())}"
-        self.active_positions[pos_id] = {
-            "pos_id": pos_id,
-            "order_id": order_id,
-            "symbol": symbol,
-            "strategy_id": strat_id,
-            "strategy_name": strat_name,
-            "side": side,
-            "product": product,
-            "quantity": quantity,
-            "original_quantity": quantity,
-            "entry_price": ltp,
-            "current_price": ltp,
-            "highest_price": ltp,
-            "lowest_price": ltp,
-            "stop_loss": sl_price,
-            "target": t1_price,
-            "target_1": t1_price,
-            "target_2": t2_price,
-            "target_1_hit": False,
-            "trailing_sl": sl_price,
-            "trailing_step_pct": trail_pct,
-            "margin_used": round(margin_req, 2),
-            "win_rate": signal.get("win_rate", 60.0),
-            "gross_pnl": 0.0,
-            "charges": 0.0,
-            "pnl": 0.0,
-            "pnl_pct": 0.0,
-            "entry_time": datetime.now(IST).strftime("%H:%M:%S"),
-            "entry_timestamp": time.time(),
-        }
+        with self._lock:
+            pos_id = f"POS_{symbol}_{int(time.time())}"
+            self.active_positions[pos_id] = {
+                "pos_id": pos_id,
+                "order_id": order_id,
+                "symbol": symbol,
+                "strategy_id": strat_id,
+                "strategy_name": strat_name,
+                "side": side,
+                "product": product,
+                "quantity": quantity,
+                "original_quantity": quantity,
+                "entry_price": ltp,
+                "current_price": ltp,
+                "highest_price": ltp,
+                "lowest_price": ltp,
+                "stop_loss": sl_price,
+                "target": t1_price,
+                "target_1": t1_price,
+                "target_2": t2_price,
+                "target_1_hit": False,
+                "trailing_sl": sl_price,
+                "trailing_step_pct": trail_pct,
+                "margin_used": round(margin_req, 2),
+                "win_rate": signal.get("win_rate", 60.0),
+                "gross_pnl": 0.0,
+                "charges": 0.0,
+                "pnl": 0.0,
+                "pnl_pct": 0.0,
+                "entry_time": datetime.now(IST).strftime("%H:%M:%S"),
+                "entry_timestamp": time.time(),
+            }
 
-        # Update Strategy & Engine Counters
-        strat["signals_count"] = strat.get("signals_count", 0) + 1
-        self.stats["signals_today"] += 1
-        self.stats["orders_today"] += 1
-        self._save_state()
+            # Update Strategy & Engine Counters
+            strat["signals_count"] = strat.get("signals_count", 0) + 1
+            self.stats["signals_today"] += 1
+            self.stats["orders_today"] += 1
+            self._save_state()
 
     # ─────────────────────────────────────────────────────────────
     # AUTO EXIT & TRADE LOGGING
