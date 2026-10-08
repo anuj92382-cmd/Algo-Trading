@@ -379,10 +379,7 @@ async function loadCustomCandleChart(symbol, interval = 'day') {
                 <canvas id="custom-candle-canvas"></canvas>
             </div>
             <div class="custom-chart-legend">
-                <span class="c-leg-item"><span class="c-leg-line green-dash"></span> PDH (Prev High)</span>
-                <span class="c-leg-item"><span class="c-leg-line red-dash"></span> PDL (Prev Low)</span>
-                <span class="c-leg-item"><span class="c-leg-box purple-box"></span> Base Zone</span>
-                <span class="c-leg-item"><span class="c-leg-line cyan-solid"></span> Live LTP</span>
+                <span class="c-leg-item"><span class="c-leg-line cyan-solid"></span> Live Price (LTP)</span>
                 <span class="c-leg-hint">🖱️ Drag to pan • Scroll to zoom</span>
             </div>
         </div>
@@ -507,16 +504,8 @@ function drawCustomChart() {
 
     visibleData.forEach(c => {
         if (c.low < minPrice) minPrice = c.low;
-        if (c.high > maxPrice) maxPrice = c.high;
-        if (c.volume > maxVol) maxVol = c.volume;
-    });
-
-    const pdh = _chartPrevDayData.high || 0;
-    const pdl = _chartPrevDayData.low || 0;
     const ltp = _selectedStock ? _selectedStock.ltp : 0;
 
-    if (pdh > 0) maxPrice = Math.max(maxPrice, pdh);
-    if (pdl > 0 && pdl < Infinity) minPrice = Math.min(minPrice, pdl);
     if (ltp > 0) {
         maxPrice = Math.max(maxPrice, ltp);
         minPrice = Math.min(minPrice, ltp);
@@ -556,62 +545,7 @@ function drawCustomChart() {
         ctx.fillText('₹' + p.toFixed(2), width - padRight + 6, y + 3);
     }
 
-    // ── 2. Draw Previous Day Shaded Base Zone ──
-    if (pdh > 0 && pdl > 0 && pdh > pdl) {
-        const yPdh = getY(pdh);
-        const yPdl = getY(pdl);
-        const baseBoxH = Math.abs(yPdl - yPdh);
-
-        ctx.fillStyle = 'rgba(139, 92, 246, 0.10)';
-        ctx.fillRect(padLeft, Math.min(yPdh, yPdl), chartW, baseBoxH);
-
-        // Border
-        ctx.strokeStyle = 'rgba(139, 92, 246, 0.25)';
-        ctx.setLineDash([3, 3]);
-        ctx.strokeRect(padLeft, Math.min(yPdh, yPdl), chartW, baseBoxH);
-        ctx.setLineDash([]);
-    }
-
-    // ── 3. Draw PDH (Green Dotted) & PDL (Red Dotted) Reference Lines ──
-    if (pdh > 0) {
-        const yPdh = getY(pdh);
-        ctx.strokeStyle = '#10b981';
-        ctx.lineWidth = 1.5;
-        ctx.setLineDash([5, 4]);
-        ctx.beginPath();
-        ctx.moveTo(padLeft, yPdh);
-        ctx.lineTo(width - padRight, yPdh);
-        ctx.stroke();
-        ctx.setLineDash([]);
-
-        // PDH Badge on axis
-        ctx.fillStyle = '#10b981';
-        ctx.fillRect(width - padRight + 2, yPdh - 8, padRight - 4, 16);
-        ctx.fillStyle = '#000000';
-        ctx.font = 'bold 9.5px monospace';
-        ctx.fillText('PDH ' + pdh.toFixed(1), width - padRight + 5, yPdh + 3.5);
-    }
-
-    if (pdl > 0) {
-        const yPdl = getY(pdl);
-        ctx.strokeStyle = '#ef4444';
-        ctx.lineWidth = 1.5;
-        ctx.setLineDash([5, 4]);
-        ctx.beginPath();
-        ctx.moveTo(padLeft, yPdl);
-        ctx.lineTo(width - padRight, yPdl);
-        ctx.stroke();
-        ctx.setLineDash([]);
-
-        // PDL Badge on axis
-        ctx.fillStyle = '#ef4444';
-        ctx.fillRect(width - padRight + 2, yPdl - 8, padRight - 4, 16);
-        ctx.fillStyle = '#ffffff';
-        ctx.font = 'bold 9.5px monospace';
-        ctx.fillText('PDL ' + pdl.toFixed(1), width - padRight + 5, yPdl + 3.5);
-    }
-
-    // ── 4. Draw Volume Bars ──
+    // ── 2. Draw Volume Bars ──
     const volTop = padTop + mainHeight + 8;
     visibleData.forEach((c, idx) => {
         const x = getX(idx);
