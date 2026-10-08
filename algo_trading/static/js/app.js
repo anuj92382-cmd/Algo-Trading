@@ -71,10 +71,14 @@ function showPage(name) {
         reversals: '🔄 Open Reversals Screener',
         trade:     '💹 Trade - Buy / Sell',
         algotrade: '⚡ Algo Trade - Autonomous Auto-Pilot',
+        mcx:       '🪙 MCX Commodity Algo Trading',
+        config:    '⚙️ System Configuration & RMS',
     };
     setText('pageTitle', titles[name] || name);
 
     // Lazy load
+    if (name === 'config')    initConfigPage();
+    if (name === 'mcx')       initMcxPage();
     if (name === 'algotrade') initAlgoTradePage();
     if (name === 'gainers' || name === 'losers') loadGainersLosers();
     if (name === 'positions') fetchPositions();

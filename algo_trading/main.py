@@ -242,6 +242,9 @@ class AlgoTradingBot:
         now = datetime.now(IST_tz).time()
         if now >= INTRADAY_EXIT_TIME:
             return  # Already in exit zone
+        from datetime import time as dtime
+        if now < dtime(9, 20):
+            return  # No orders before 9:20 AM
 
         try:
             # Latest data fetch karo

@@ -32,6 +32,7 @@ function initAlgoTradePage() {
             if (page && page.classList.contains('active')) {
                 loadAlgoStatus();
                 fetchAlgoPositions();
+                fetchAlgoTrades();   // ✅ Fixed: Completed trades bhi auto-refresh hongi
                 fetchAlgoLogs();
                 loadAlgoEquityCurve();
             }
@@ -141,7 +142,7 @@ function renderAlgoStatus(data) {
     const chargesVal = parseFloat(stats.today_charges !== undefined ? stats.today_charges : (stats.total_charges || 0)) || 0;
     const chargesElem = document.getElementById('algo-kpi-charges');
     if (chargesElem) {
-        chargesElem.innerText = (chargesVal > 0 ? '-₹' : '₹') + Math.abs(chargesVal).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        chargesElem.innerText = '₹' + Math.abs(chargesVal).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
         chargesElem.className = 'algo-kpi-val ' + (chargesVal > 0 ? 'red' : '');
     }
 
@@ -155,15 +156,24 @@ function renderAlgoStatus(data) {
     // Circuit Breaker Alert & Status Badge
     const cbAlert = document.getElementById('algo-circuit-breaker-alert');
     const cbBadge = document.getElementById('algo-cb-status-badge');
+    const cbMini = document.getElementById('algo-cb-status-badge-mini');
     if (data.circuit_breaker_hit) {
         if (cbAlert) {
             cbAlert.style.display = 'flex';
             setText('algo-cb-reason', data.circuit_breaker_reason || 'Daily Loss Limit Breached');
         }
         if (cbBadge) cbBadge.style.display = 'none';
+        if (cbMini) {
+            cbMini.className = 'badge-pill red';
+            cbMini.textContent = 'TRIPPED: ' + (data.circuit_breaker_reason || 'HALTED');
+        }
     } else {
         if (cbAlert) cbAlert.style.display = 'none';
         if (cbBadge) cbBadge.style.display = 'inline-flex';
+        if (cbMini) {
+            cbMini.className = 'badge-pill green';
+            cbMini.textContent = 'ARMED & PROTECTED';
+        }
     }
 }
 
@@ -421,13 +431,21 @@ function renderStrategiesGrid(strategies, totalCap) {
                         <span class="param-lbl">Capital / Trade</span>
                         <span class="param-val ${enabled ? 'cyan' : ''}">${capDisplay}</span>
                     </div>
+                    <div class="strat-param">
+                        <span class="param-lbl">Fixed Qty</span>
+                        <span class="param-val ${(s.fixed_qty && s.fixed_qty > 0) ? 'yellow' : ''}">${(s.fixed_qty && s.fixed_qty > 0) ? s.fixed_qty + ' qty' : 'Auto'}</span>
+                    </div>
                 </div>
 
                 <div class="strat-card-footer">
                     <div class="strat-signals-badge">
                         <span>🎯 Signals:</span> <strong>${signalsCount}</strong>
                     </div>
-                    <div style="display:flex;gap:6px">
+                    <div style="display:flex;gap:6px;flex-wrap:wrap">
+                        ${(s.id === 'custom_quant_momentum') ? `
+                        <button class="btn btn-sm btn-cyan" onclick="openQuantScannerModal('${s.id}')" title="Live 4-Filter Scanner Stocks Table">
+                            📋 View Stocks
+                        </button>` : ''}
                         <button class="btn btn-sm btn-strat-info" onclick="openAlgoStratAnalytics('${s.id}')" title="Strategy Performance & Win/Loss Analytics">
                             ℹ️ Info
                         </button>
@@ -501,6 +519,7 @@ function openAlgoStratModal(stratId) {
     setText('modal-fair-share', `₹${Math.round(fairShare).toLocaleString('en-IN')}`);
     setVal('algo-modal-product', s.product || 'MIS');
     setVal('algo-modal-side', s.side || 'BOTH');
+    setVal('algo-modal-fixed-qty', s.fixed_qty != null ? s.fixed_qty : 0);
 
     const modal = document.getElementById('algo-strat-modal');
     if (modal) modal.style.display = 'flex';
@@ -531,6 +550,7 @@ async function saveAlgoStratModal() {
         capital_per_trade: stratCap,
         product: document.getElementById('algo-modal-product').value,
         side: document.getElementById('algo-modal-side').value,
+        fixed_qty: parseInt(document.getElementById('algo-modal-fixed-qty').value) || 0,
     };
 
 
@@ -678,12 +698,12 @@ function renderAlgoPositionsTable(positions) {
         const grossPnl = p.gross_pnl !== undefined ? p.gross_pnl : pnl;
         const grossColor = grossPnl >= 0 ? 'green' : 'red';
         const grossSign = grossPnl >= 0 ? '+' : '';
-        const charges = p.charges || 0;
+        const estCharges = p.est_charges || p.charges || 0;
 
-        let chargesTip = `Est. Round-Trip Charges: ₹${charges.toFixed(2)}`;
+        let chargesTip = `Est. Charges on Exit: ₹${estCharges.toFixed(2)} (Deducted upon Sell/Settlement)`;
         if (p.charges_breakdown && typeof p.charges_breakdown === 'object') {
             const parts = Object.entries(p.charges_breakdown).map(([k, v]) => `${k}: ${v}`);
-            chargesTip = `Est. Round-Trip Charges: ₹${charges.toFixed(2)} (${parts.join(' | ')})`;
+            chargesTip = `Est. Charges on Exit: ₹${estCharges.toFixed(2)} (${parts.join(' | ')}) - Deducted upon Sell/Settlement`;
         }
 
         return `
@@ -710,9 +730,9 @@ function renderAlgoPositionsTable(positions) {
                 <td class="${pnlColor}">
                     <div><strong>${pnlSign}₹${Math.abs(pnl).toFixed(2)}</strong> <small>(${pnlSign}${pnlPct.toFixed(2)}%)</small></div>
                     <div style="font-size:10px;opacity:0.85;margin-top:2px;white-space:nowrap;" title="${escapeHtml(chargesTip)}">
-                        Gross: <span class="${grossColor}">${grossSign}₹${Math.abs(grossPnl).toFixed(2)}</span>
+                        <span>LTP Gross</span>
                         <span style="color:var(--text3)"> | </span>
-                        Chg: <span class="red" style="text-decoration:underline dotted;cursor:help;">-₹${charges.toFixed(2)}</span>
+                        <span style="color:var(--text3);text-decoration:underline dotted;cursor:help;">Est. Chg: ₹${estCharges.toFixed(2)} (On Sell)</span>
                     </div>
                 </td>
                 <td>${statusBadge}</td>
@@ -871,7 +891,7 @@ function renderAlgoTradesTable(trades) {
         const grossSign = grossPnl >= 0 ? '+' : '';
 
         const charges = t.charges || 0;
-        let chargesTip = `Total Charges: ₹${charges.toFixed(2)}`;
+        let chargesTip = charges > 0 ? `Total Charges: ₹${charges.toFixed(2)}` : 'No brokerage charged on loss trade';
         if (t.charges_breakdown && typeof t.charges_breakdown === 'object') {
             const parts = Object.entries(t.charges_breakdown).map(([k, v]) => `${k}: ${v}`);
             chargesTip = parts.join(' | ');
@@ -907,7 +927,7 @@ function renderAlgoTradesTable(trades) {
                 <td>₹${(t.exit_price || 0).toFixed(2)}</td>
                 <td class="${grossColor}">${grossSign}₹${Math.abs(grossPnl).toFixed(2)}</td>
                 <td>
-                    <span class="badge-mini red" title="${escapeHtml(chargesTip)}" style="cursor:help;">-₹${charges.toFixed(2)}</span>
+                    <span class="badge-mini ${charges > 0 ? 'red' : 'grey'}" title="${escapeHtml(chargesTip)}" style="cursor:help;">${charges > 0 ? ('-₹' + charges.toFixed(2)) : '₹0.00'}</span>
                 </td>
                 <td class="${pnlColor}"><strong>${pnlSign}₹${Math.abs(pnl).toFixed(2)}</strong></td>
                 <td class="${pnlColor}">${pnlSign}${pnlPct.toFixed(2)}%</td>
@@ -1251,6 +1271,7 @@ async function fetchStrategyAnalytics(stratId, days) {
                     const retVal = t.return_pct || 0;
                     const pnlClass = isActive ? 'yellow' : (isWin ? 'green' : 'red');
                     const badgeClass = isActive ? 'badge-mini yellow' : (isWin ? 'badge-mini green' : 'badge-mini red');
+                    const exitReasonText = (t.exit_reason || '').replace('[DEMO] ', '');
 
                     return `
                         <tr>
@@ -1262,7 +1283,7 @@ async function fetchStrategyAnalytics(stratId, days) {
                             <td>₹${(t.exit_price || 0).toFixed(2)}</td>
                             <td class="${pnlClass}" style="font-weight:600">${retVal >= 0 ? '+' : ''}${retVal.toFixed(2)}%</td>
                             <td class="${pnlClass}" style="font-weight:700">${pnlVal >= 0 ? '+₹' : '-₹'}${Math.abs(pnlVal).toFixed(2)}</td>
-                            <td><span class="${badgeClass}">${t.status}</span> <span style="font-size:10px;color:var(--text3)">${t.exit_reason || ''}</span></td>
+                            <td><span class="${badgeClass}">${t.status}</span> <span style="font-size:10px;color:var(--text3)">${escapeHtml(exitReasonText)}</span></td>
                         </tr>
                     `;
                 }).join('');
@@ -1271,5 +1292,229 @@ async function fetchStrategyAnalytics(stratId, days) {
     } catch (e) {
         console.error('Error fetching strategy analytics:', e);
         showToast('Failed to load strategy performance: ' + e, 'error');
+    }
+}
+
+
+// ─── 7. LIVE QUANT STRATEGY SCANNER STOCKS MODAL ──────────────────
+let _quantScannerCache = [];
+let _quantScannerActiveFilter = 'ALL';
+let _quantScannerSearchTerm = '';
+
+async function openQuantScannerModal(stratId) {
+    const modal = document.getElementById('algo-quant-scanner-modal');
+    if (modal) modal.style.display = 'flex';
+    fetchQuantScannerStocks();
+}
+
+function closeQuantScannerModal() {
+    const modal = document.getElementById('algo-quant-scanner-modal');
+    if (modal) modal.style.display = 'none';
+}
+
+async function fetchQuantScannerStocks() {
+    const refreshBtn = document.getElementById('quant-scanner-refresh-btn');
+    if (refreshBtn) refreshBtn.disabled = true;
+    const tbody = document.getElementById('quant-scanner-tbody');
+    if (tbody && _quantScannerCache.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="8" class="algo-loading">Scanning live universe across 4 filters & OI momentum...</td></tr>';
+    }
+
+    try {
+        const res = await fetch('/api/algo/custom_scanner_stocks');
+        const data = await res.json();
+        if (data.success) {
+            _quantScannerCache = data.stocks || [];
+            applyQuantScannerFilters();
+            renderQuantScannerSectors(data.bullish_sectors || []);
+
+            setText('quant-scanner-count-badge', `${data.total || 0} Found (${data.buy_ready_count || 0} Buy Ready)`);
+            setText('quant-pill-all-cnt', data.total || 0);
+            setText('quant-pill-buy-cnt', data.buy_ready_count || 0);
+            setText('quant-scanner-last-updated', `Last scan: ${data.timestamp || new Date().toLocaleTimeString('en-IN')}`);
+        } else {
+            showToast(data.error || 'Failed to scan stocks', 'error');
+        }
+    } catch (e) {
+        console.error('Quant scanner fetch error:', e);
+        if (tbody) tbody.innerHTML = '<tr><td colspan="8" class="empty">Error loading scanner data. Please try again.</td></tr>';
+    } finally {
+        if (refreshBtn) refreshBtn.disabled = false;
+    }
+}
+
+function renderQuantScannerSectors(sectors) {
+    const container = document.getElementById('quant-scanner-sectors-tags');
+    if (!container) return;
+    if (!sectors || sectors.length === 0) {
+        container.innerHTML = '<span style="color:var(--text3);font-size:11px">No sectors currently above +0.5% average gain threshold</span>';
+        return;
+    }
+    container.innerHTML = sectors.map(sec => `
+        <span class="qs-sector-tag">
+            ${escapeHtml(sec.name)}: <strong>+${sec.change_pct}%</strong> <span class="sect-chg">(${sec.stocks_count} stocks)</span>
+        </span>
+    `).join('');
+}
+
+function filterQuantScannerCategory(category, btnElement) {
+    _quantScannerActiveFilter = category;
+    const group = document.getElementById('quant-scanner-pills');
+    if (group && btnElement) {
+        group.querySelectorAll('.qs-pill').forEach(b => {
+            b.classList.remove('active', 'active-buy');
+        });
+        btnElement.classList.add(category === 'BUY_SIGNAL' ? 'active-buy' : 'active');
+    }
+    applyQuantScannerFilters();
+}
+
+function filterQuantScannerSearch(term) {
+    _quantScannerSearchTerm = (term || '').toUpperCase().trim();
+    applyQuantScannerFilters();
+}
+
+function applyQuantScannerFilters() {
+    let list = _quantScannerCache || [];
+
+    if (_quantScannerActiveFilter === 'BUY_SIGNAL') {
+        list = list.filter(s => s.status === 'BUY_SIGNAL');
+    } else if (_quantScannerActiveFilter !== 'ALL') {
+        list = list.filter(s => s.triggers && s.triggers.some(t => t.code === _quantScannerActiveFilter));
+    }
+
+    if (_quantScannerSearchTerm) {
+        list = list.filter(s => {
+            const symMatch = s.symbol.includes(_quantScannerSearchTerm);
+            const triggerMatch = s.triggers && s.triggers.some(t => t.label.toUpperCase().includes(_quantScannerSearchTerm));
+            const oiMatch = s.oi_confirmation_desc && s.oi_confirmation_desc.toUpperCase().includes(_quantScannerSearchTerm);
+            return symMatch || triggerMatch || oiMatch;
+        });
+    }
+
+    renderQuantScannerTable(list);
+}
+
+function renderQuantScannerTable(stocks) {
+    const tbody = document.getElementById('quant-scanner-tbody');
+    if (!tbody) return;
+
+    if (!stocks || stocks.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="8" class="empty" style="text-align:center;padding:32px;color:#475569">No stocks currently matching the selected criteria.</td></tr>';
+        return;
+    }
+
+    tbody.innerHTML = stocks.map(s => {
+        const isBuy = (s.status === 'BUY_SIGNAL');
+
+        const statusBadge = isBuy
+            ? '<div class="qs-status-badge buy">🟢 BUY SIGNAL</div>'
+            : '<div class="qs-status-badge candidate">⏳ CANDIDATE</div>';
+
+        const dayChgCls = s.day_chg_pct >= 0 ? 'up' : 'down';
+        const dayChgSign = s.day_chg_pct >= 0 ? '+' : '';
+
+        const triggersHtml = (s.triggers || []).map(t => {
+            let cls = 'sector', icon = '🏢';
+            if (t.code === 'PREV_DAY')   { cls = 'prev-day';   icon = '📅'; }
+            else if (t.code === 'OPEN_SURGE') { cls = 'surge';  icon = '🚀'; }
+            else if (t.code === 'PRE_MARKET') { cls = 'pre-market'; icon = '⏰'; }
+            return `<span class="quant-trigger-pill ${cls}">${icon} ${escapeHtml(t.label)}</span>`;
+        }).join('');
+
+        // Short Covering / OI Status formatting
+        let oiHtml = '';
+        const oiDesc = s.oi_confirmation_desc || '';
+        const match = oiDesc.match(/^(.*?)\s*\((.*?)\)$/);
+        const oiTitle = match ? match[1].trim() : (oiDesc || 'Awaiting Confirmation');
+        const oiSub = match ? match[2].trim() : (isBuy ? 'Holding above VWAP' : 'Awaiting VWAP / Short Squeeze');
+        const oiIcon = isBuy ? '✓' : '⏳';
+        const oiClass = isBuy ? 'confirmed' : 'pending';
+
+        oiHtml = `
+            <div class="qs-oi-box ${oiClass}">
+                <div class="qs-oi-head">
+                    <span class="qs-oi-icon">${oiIcon}</span>
+                    <span>${escapeHtml(oiTitle)}</span>
+                </div>
+                <div class="qs-oi-sub">${escapeHtml(oiSub)}</div>
+            </div>`;
+
+        // Win Rate KPI widget
+        const wr = (s.win_rate || 0);
+        const wrCls = wr >= 65 ? 'high' : 'med';
+        const wrPct = Math.min(100, Math.max(0, Math.round(wr)));
+        const wrLabel = wr >= 65 ? 'High Prob' : 'Moderate';
+        const wrHtml = `
+            <div class="qs-wr-box">
+                <span class="qs-wr-num ${wrCls}">${wr.toFixed(0)}%</span>
+                <div class="qs-wr-bar-bg">
+                    <div class="qs-wr-bar-fill ${wrCls}" style="width:${wrPct}%"></div>
+                </div>
+                <span class="qs-wr-sub">${wrLabel}</span>
+            </div>`;
+
+        const slTargetsHtml = `
+            <div class="quant-sl-box">
+                <div class="qs-sl-line">🛡️ SL: ₹${(s.stop_loss || 0).toFixed(2)} <span class="qs-sl-pct">(-1.5%)</span></div>
+                <div class="qs-t-line">🎯 T1: ₹${(s.target_1 || 0).toFixed(2)}<span class="qs-t-sep">|</span>T2: ₹${(s.target_2 || 0).toFixed(2)}</div>
+            </div>`;
+
+        const actionBtn = s.in_position
+            ? '<span class="qs-intrade-badge">⚡ In Trade</span>'
+            : `<button class="qs-buy-btn" onclick="executeQuickManualOrder('${s.symbol}', 'BUY', ${s.ltp})">⚡ Buy</button>`;
+
+        return `
+            <tr class="${isBuy ? 'row-highlight-buy' : ''}">
+                <td>
+                    <div class="qs-symbol-name">${escapeHtml(s.symbol)}</div>
+                    ${statusBadge}
+                </td>
+                <td>
+                    <div class="qs-ltp">₹${(s.ltp || 0).toFixed(2)}</div>
+                    <div class="qs-vwap">VWAP: ₹${(s.vwap || 0).toFixed(2)}</div>
+                </td>
+                <td>
+                    <div class="qs-chg ${dayChgCls}">${dayChgSign}${(s.day_chg_pct || 0).toFixed(2)}%</div>
+                    <div class="qs-open-price">Open: ₹${(s.open || 0).toFixed(2)}</div>
+                </td>
+                <td>
+                    <div style="display:flex;flex-wrap:wrap;gap:2px">${triggersHtml}</div>
+                </td>
+                <td>${oiHtml}</td>
+                <td style="text-align:center">${wrHtml}</td>
+                <td>${slTargetsHtml}</td>
+                <td style="text-align:center">${actionBtn}</td>
+            </tr>`;
+    }).join('');
+}
+
+async function executeQuickManualOrder(symbol, side, price) {
+    if (!confirm(`Are you sure you want to execute a ⚡ Quick BUY on ${symbol} @ ₹${price}?`)) {
+        return;
+    }
+    try {
+        const res = await fetch('/api/trade/place', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                symbol: symbol,
+                action: side,
+                quantity: 1,
+                product: 'MIS',
+                order_type: 'MARKET',
+                price: price
+            })
+        });
+        const data = await res.json();
+        if (data.success) {
+            showToast(`✅ Quick order placed for ${symbol}!`, 'success');
+            fetchAlgoPositions();
+            fetchQuantScannerStocks();
+        } else {
+            showToast(data.error || 'Failed to place order', 'error');
+        }
+    } catch (e) {
+        showToast('Error placing order: ' + e, 'error');
     }
 }

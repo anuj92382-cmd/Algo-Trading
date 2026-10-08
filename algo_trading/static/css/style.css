@@ -3306,8 +3306,9 @@ tr.row-crossed-break:hover {
 /* 3-Card Container */
 .algo-rms-card-container {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(310px, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
     gap: 14px;
+    min-width: 0;
 }
 
 .algo-rms-card {
@@ -3319,6 +3320,9 @@ tr.row-crossed-break:hover {
     flex-direction: column;
     gap: 12px;
     transition: border-color 0.2s ease, box-shadow 0.2s ease;
+    min-width: 0;
+    box-sizing: border-box;
+    overflow: hidden;
 }
 
 .algo-rms-card:hover {
@@ -3332,48 +3336,63 @@ tr.row-crossed-break:hover {
     gap: 10px;
     padding-bottom: 8px;
     border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+    min-width: 0;
 }
 
 .rms-card-icon {
     font-size: 19px;
     line-height: 1;
+    flex-shrink: 0;
 }
 
 .rms-card-title {
     font-size: 13.5px;
     font-weight: 700;
     color: #f1f5f9;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 .rms-card-subtitle {
     font-size: 11px;
     color: #64748b;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 .rms-card-body {
     display: flex;
     flex-direction: column;
     gap: 11px;
+    min-width: 0;
+    box-sizing: border-box;
 }
 
 .rms-row-2col {
     display: grid;
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: repeat(auto-fit, minmax(125px, 1fr));
     gap: 10px;
+    min-width: 0;
 }
 
 .rms-input-group {
     display: flex;
     flex-direction: column;
     gap: 5px;
+    min-width: 0;
 }
 
 .rms-input-group label {
     display: flex;
     align-items: center;
     justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 2px 6px;
     font-size: 11px;
     cursor: pointer;
+    min-width: 0;
 }
 
 .rms-label-tag {
@@ -3382,6 +3401,8 @@ tr.row-crossed-break:hover {
     padding: 2px 6px;
     border-radius: 4px;
     letter-spacing: 0.5px;
+    white-space: nowrap;
+    flex-shrink: 0;
 }
 
 .rms-label-tag.red {
@@ -3416,7 +3437,11 @@ tr.row-crossed-break:hover {
 
 .rms-hint {
     color: #64748b;
-    font-size: 10.5px;
+    font-size: 10px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 100%;
 }
 
 .rms-input-wrapper {
@@ -3427,6 +3452,9 @@ tr.row-crossed-break:hover {
     border-radius: 6px;
     overflow: hidden;
     transition: border-color 0.2s, box-shadow 0.2s;
+    min-width: 0;
+    width: 100%;
+    box-sizing: border-box;
 }
 
 .rms-input-wrapper.loss-border:focus-within {
@@ -3440,11 +3468,12 @@ tr.row-crossed-break:hover {
 }
 
 .rms-currency {
-    padding: 6px 11px;
+    padding: 6px 9px;
     font-weight: 700;
-    font-size: 13.5px;
+    font-size: 13px;
     user-select: none;
     border-right: 1px solid #1a2f4c;
+    flex-shrink: 0;
 }
 
 .rms-currency.red {
@@ -3459,10 +3488,13 @@ tr.row-crossed-break:hover {
 
 .rms-styled-input {
     flex: 1;
+    min-width: 0;
+    width: 100%;
+    box-sizing: border-box;
     background: transparent;
     border: none;
     outline: none;
-    padding: 7px 11px;
+    padding: 7px 9px;
     font-size: 13px;
     font-weight: 700;
     font-family: 'JetBrains Mono', Consolas, monospace;
@@ -4058,4 +4090,135 @@ table tbody td a {
 }
 table tbody td a:hover {
     color: #7dd3fc;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   RESPONSIVE: RMS PANEL & CARDS
+   ═══════════════════════════════════════════════════════════════ */
+
+/* Tablet — 2 cards per row, timing card full width below */
+@media (max-width: 1024px) {
+    .algo-rms-card-container {
+        grid-template-columns: repeat(2, 1fr);
+    }
+    .algo-rms-card.rms-card-timing {
+        grid-column: 1 / -1;
+    }
+    .algo-rms-panel {
+        padding: 14px 16px;
+    }
+}
+
+/* Mobile — single column stack */
+@media (max-width: 768px) {
+    .algo-rms-card-container {
+        grid-template-columns: 1fr;
+        gap: 12px;
+    }
+    .algo-rms-card.rms-card-timing {
+        grid-column: auto;
+    }
+    /* RMS Header: stack title & actions */
+    .algo-rms-header {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 10px;
+    }
+    .algo-rms-header-actions {
+        width: 100%;
+        justify-content: flex-start;
+        gap: 8px;
+    }
+    .algo-rms-panel {
+        padding: 12px 12px;
+        margin-bottom: 14px;
+    }
+    .algo-rms-title strong {
+        font-size: 13px;
+    }
+    .algo-rms-sub {
+        font-size: 10px;
+    }
+    /* Internal 2-col rows stack to 1-col */
+    .rms-row-2col {
+        grid-template-columns: 1fr;
+        gap: 8px;
+    }
+    /* Timing items: keep side-by-side but allow wrapping */
+    .rms-timing-item {
+        flex-wrap: wrap;
+        gap: 6px;
+        padding: 8px 10px;
+    }
+    .rms-timing-badge {
+        font-size: 9px;
+        padding: 2px 6px;
+    }
+    /* Card internal spacing */
+    .algo-rms-card {
+        padding: 12px 14px;
+        gap: 10px;
+    }
+    .rms-card-title {
+        font-size: 12.5px;
+    }
+    .rms-card-subtitle {
+        font-size: 10px;
+    }
+    .rms-card-icon {
+        font-size: 16px;
+    }
+}
+
+/* Small mobile — extra tight */
+@media (max-width: 480px) {
+    .algo-rms-panel {
+        padding: 10px 8px;
+    }
+    .algo-rms-card {
+        padding: 10px 10px;
+    }
+    .rms-styled-input {
+        font-size: 12px;
+        padding: 6px 8px;
+    }
+    .rms-styled-select {
+        font-size: 11px;
+        padding: 6px 8px;
+    }
+    .rms-label-tag {
+        font-size: 8.5px;
+        padding: 1.5px 5px;
+    }
+    .rms-hint {
+        font-size: 9.5px;
+    }
+    .rms-currency {
+        padding: 5px 8px;
+        font-size: 12px;
+    }
+    /* Timing items: stack on very small */
+    .rms-timing-item {
+        flex-direction: row;
+        align-items: center;
+        gap: 6px;
+    }
+    .rms-timing-lbl {
+        font-size: 9.5px;
+    }
+    .rms-timing-val {
+        font-size: 10.5px;
+    }
+    /* Header buttons */
+    .rms-save-btn {
+        padding: 5px 10px;
+        font-size: 11px;
+    }
+    .badge-pill {
+        font-size: 10px;
+        padding: 3px 8px;
+    }
+    .algo-rms-header-actions {
+        flex-wrap: wrap;
+    }
 }

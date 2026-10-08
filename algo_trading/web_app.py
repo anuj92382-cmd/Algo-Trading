@@ -7,7 +7,8 @@ import sys
 import json
 import logging
 import threading
-from datetime import datetime, date
+import time
+from datetime import datetime, date, timedelta
 from pathlib import Path
 
 # ── SSL Fix - sabse pehle ────────────────────────────────────
@@ -60,12 +61,15 @@ _state = {
     "error":           "",
     "paper_portfolio": None,  # Paper trading portfolio tracker
     "algo_engine":     None,  # Autonomous Algo Trading Engine
+    "mcx_engine":      None,  # Autonomous MCX Commodity Engine
 }
 
-# Initialize paper portfolio if in paper mode
-if IS_PAPER_TRADING:
+# Initialize paper portfolio tracker
+try:
     _state["paper_portfolio"] = PaperPortfolio()
     logger.info("📄 Paper Portfolio initialized")
+except Exception as _pe:
+    logger.warning(f"Paper portfolio init warning: {_pe}")
 
 try:
     from algo_engine import AlgoEngine
@@ -73,6 +77,13 @@ try:
     logger.info("⚡ Autonomous AlgoEngine attached to web_state")
 except Exception as _algo_err:
     logger.error(f"Failed to initialize AlgoEngine: {_algo_err}")
+
+try:
+    from mcx_engine import MCXEngine
+    _state["mcx_engine"] = MCXEngine(_state)
+    logger.info("🪙 Autonomous MCXEngine attached to web_state")
+except Exception as _mcx_err:
+    logger.error(f"Failed to initialize MCXEngine: {_mcx_err}")
 
 BASE_DIR = Path(__file__).resolve().parent
 TOKEN_FILE = BASE_DIR / "data" / "access_token.json"
@@ -102,9 +113,29 @@ def _save_watchlist_symbols(symbols: list):
     except Exception as e:
         logger.error(f"Failed to save watchlist.json: {e}")
 
+def _update_env_variable(key: str, value: str) -> bool:
+    """Updates or adds a KEY=VALUE pair in .env file safely."""
+    import re
+    env_file = BASE_DIR / ".env"
+    try:
+        content = ""
+        if env_file.exists():
+            with open(env_file, "r", encoding="utf-8") as f:
+                content = f.read()
 
+        pattern = rf"^{re.escape(key)}=.*$"
+        if re.search(pattern, content, flags=re.MULTILINE):
+            new_content = re.sub(pattern, f"{key}={value}", content, flags=re.MULTILINE)
+        else:
+            new_content = content.rstrip() + f"\n{key}={value}\n"
 
-
+        with open(env_file, "w", encoding="utf-8") as f:
+            f.write(new_content)
+        logger.info(f"✅ Updated .env: {key}={value}")
+        return True
+    except Exception as e:
+        logger.error(f"❌ Failed to update .env ({key}={value}): {e}")
+        return False
 # ─────────────────────────────────────────────────────────────
 # TOKEN HELPERS
 # ─────────────────────────────────────────────────────────────
@@ -467,12 +498,36 @@ def api_status():
     else:
         mkt = "CLOSED"
 
+    # Real Live Margins detection from Kite Connect
+    is_live_mode = (TRADING_MODE == "LIVE")
+    if _state.get("algo_engine") and getattr(_state["algo_engine"], "mode", None) == "LIVE":
+        is_live_mode = True
+
+    eq_live_bal = 0.0
+    comm_live_bal = 0.0
+    total_live_bal = TOTAL_CAPITAL
+
+    if _state.get("kite"):
+        try:
+            m = _state["kite"].margins()
+            eq = m.get("equity", {})
+            comm = m.get("commodity", {})
+            eq_live_bal = float(eq.get("available", {}).get("live_balance", 0) or eq.get("available", {}).get("cash", 0) or eq.get("net", 0) or 0)
+            comm_live_bal = float(comm.get("available", {}).get("live_balance", 0) or comm.get("available", {}).get("cash", 0) or comm.get("net", 0) or 0)
+            total_live_bal = eq_live_bal + comm_live_bal
+        except Exception as _me:
+            logger.debug(f"Failed to fetch live Kite margins: {_me}")
+
+    display_capital = total_live_bal if is_live_mode else TOTAL_CAPITAL
+
     return jsonify({
         "logged_in":        _state["logged_in"],
         "bot_running":      _state["bot_running"],
-        "trading_mode":     TRADING_MODE,
-        "is_paper":         IS_PAPER_TRADING,
-        "capital":          TOTAL_CAPITAL,
+        "trading_mode":     "LIVE" if is_live_mode else "PAPER",
+        "is_paper":         not is_live_mode,
+        "capital":          display_capital,
+        "equity_capital":   eq_live_bal,
+        "commodity_capital": comm_live_bal,
         "market_status":    mkt,
         "time":             ist_now.strftime("%I:%M:%S %p"),  # 12-hour format with AM/PM
         "date":             ist_now.strftime("%d %b %Y"),
@@ -487,17 +542,35 @@ def api_status():
 
 @app.route("/api/pnl")
 def api_pnl():
+    is_live_mode = (TRADING_MODE == "LIVE")
+    if _state.get("algo_engine") and getattr(_state["algo_engine"], "mode", None) == "LIVE":
+        is_live_mode = True
+
+    display_capital = TOTAL_CAPITAL
+    if is_live_mode and _state.get("kite"):
+        try:
+            m = _state["kite"].margins()
+            eq = m.get("equity", {})
+            comm = m.get("commodity", {})
+            eq_bal = float(eq.get("available", {}).get("live_balance", 0) or eq.get("available", {}).get("cash", 0) or eq.get("net", 0) or 0)
+            comm_bal = float(comm.get("available", {}).get("live_balance", 0) or comm.get("available", {}).get("cash", 0) or comm.get("net", 0) or 0)
+            display_capital = eq_bal + comm_bal
+        except Exception as _me:
+            logger.debug(f"Error fetching live margins in pnl: {_me}")
+
     risk = _state["risk_mgr"]
     if not risk:
         return jsonify({
             "daily_pnl": 0, "daily_pnl_pct": 0,
             "total_trades": 0, "winners": 0, "losers": 0,
-            "win_rate": 0, "current_capital": TOTAL_CAPITAL,
+            "win_rate": 0, "current_capital": display_capital,
             "loss_used_pct": 0, "loss_remaining": MAX_DAILY_LOSS_AMOUNT,
             "trading_halted": False, "halt_reason": "",
             "active_positions": 0, "max_daily_loss": MAX_DAILY_LOSS_AMOUNT,
         })
     s = risk.get_daily_stats()
+    if is_live_mode:
+        s["current_capital"] = display_capital
     s["max_daily_loss"] = MAX_DAILY_LOSS_AMOUNT
     return jsonify(s)
 
@@ -732,13 +805,144 @@ def api_algo_toggle():
 @app.route("/api/algo/mode", methods=["POST"])
 def api_algo_mode():
     """Toggles execution mode between PAPER (5X Intraday Margin) and LIVE (Zerodha)"""
+    global TRADING_MODE
     engine = _state.get("algo_engine")
     if not engine:
         return jsonify({"success": False, "error": "Algo engine not initialized"})
 
     body = request.get_json(silent=True) or {}
     mode = body.get("mode", "PAPER").upper().strip()
-    return jsonify(engine.set_mode(mode))
+    if mode not in ("PAPER", "LIVE"):
+        return jsonify({"success": False, "error": "Invalid mode. Must be PAPER or LIVE"})
+
+    res = engine.set_mode(mode)
+    if res.get("success"):
+        TRADING_MODE = mode
+        _update_env_variable("TRADING_MODE", mode)
+        if _state.get("mcx_engine"):
+            try:
+                _state["mcx_engine"].set_mode(mode)
+            except Exception as me:
+                logger.warning(f"MCX engine mode sync: {me}")
+        if mode == "PAPER" and not _state.get("paper_portfolio"):
+            try:
+                _state["paper_portfolio"] = PaperPortfolio()
+            except Exception:
+                pass
+    return jsonify(res)
+
+
+def _get_live_kite_margins():
+    """Fetches real Zerodha Kite margins with caching (10s TTL) to prevent timeouts."""
+    now = time.time()
+    cached = _state.get("_cached_kite_margins")
+    last_t = _state.get("_cached_kite_margins_time", 0)
+    if cached and (now - last_t < 10):
+        return cached
+
+    kite = _state.get("kite")
+    if not kite:
+        return {"equity": 0.0, "commodity": 0.0, "net": 0.0}
+
+    try:
+        m = kite.margins()
+        eq = m.get("equity", {})
+        comm = m.get("commodity", {})
+        eq_bal = float(eq.get("available", {}).get("live_balance", 0) or eq.get("available", {}).get("cash", 0) or eq.get("net", 0) or 0)
+        comm_bal = float(comm.get("available", {}).get("live_balance", 0) or comm.get("available", {}).get("cash", 0) or comm.get("net", 0) or 0)
+        res = {
+            "equity": round(eq_bal, 2),
+            "commodity": round(comm_bal, 2),
+            "net": round(eq_bal + comm_bal, 2),
+        }
+        _state["_cached_kite_margins"] = res
+        _state["_cached_kite_margins_time"] = now
+        return res
+    except Exception as e:
+        logger.debug(f"Error fetching Kite margins: {e}")
+        if cached:
+            return cached
+        return {"equity": 0.0, "commodity": 0.0, "net": 0.0}
+
+
+@app.route("/api/config", methods=["GET", "POST"])
+def api_system_config():
+    """Consolidated config endpoint for Trading Mode, Paper Settings, and RMS Rules."""
+    global TRADING_MODE, TOTAL_CAPITAL
+    engine = _state.get("algo_engine")
+    
+    if request.method == "POST":
+        body = request.get_json(silent=True) or {}
+        
+        # 1. Update Mode if provided
+        if "mode" in body or "trading_mode" in body:
+            new_mode = (body.get("mode") or body.get("trading_mode")).upper().strip()
+            if new_mode in ("PAPER", "LIVE"):
+                TRADING_MODE = new_mode
+                _update_env_variable("TRADING_MODE", new_mode)
+                if engine:
+                    engine.set_mode(new_mode)
+                if _state.get("mcx_engine"):
+                    try:
+                        _state["mcx_engine"].set_mode(new_mode)
+                    except Exception:
+                        pass
+
+        # 2. Update Capital if provided
+        if "total_capital" in body:
+            try:
+                new_cap = float(body["total_capital"])
+                if new_cap > 0:
+                    TOTAL_CAPITAL = new_cap
+                    _update_env_variable("TOTAL_CAPITAL", str(int(new_cap)))
+                    if engine:
+                        engine.update_config({"risk_config": {"total_capital": new_cap}})
+            except Exception as e:
+                logger.error(f"Error updating total capital: {e}")
+                
+        # 3. Update RMS & Universe if provided
+        if engine and ("risk_config" in body or "universe" in body or "strategies" in body):
+            engine.update_config(body)
+            
+        return jsonify({"success": True, "message": "Configuration saved successfully", "mode": TRADING_MODE})
+
+    # GET request
+    algo_cfg = engine.get_config() if engine else {}
+    risk_cfg = algo_cfg.get("risk_config", {})
+    
+    # Paper summary
+    paper_summary = {
+        "total_capital": TOTAL_CAPITAL,
+        "net_capital": TOTAL_CAPITAL,
+        "used_margin": 0.0,
+        "available_margin": TOTAL_CAPITAL,
+        "closed_pnl": 0.0,
+        "open_pnl": 0.0,
+        "open_positions_count": 0,
+        "total_orders_count": 0,
+    }
+    portfolio = _state.get("paper_portfolio")
+    if portfolio:
+        try:
+            summary = portfolio.get_margin_summary(_state.get("kite"), TOTAL_CAPITAL)
+            paper_summary.update(summary)
+            paper_summary["open_positions_count"] = len(portfolio.positions)
+            paper_summary["total_orders_count"] = len(portfolio.orders)
+        except Exception as pe:
+            logger.debug(f"Paper summary error: {pe}")
+
+    return jsonify({
+        "trading_mode": TRADING_MODE,
+        "total_capital": TOTAL_CAPITAL,
+        "is_paper": (TRADING_MODE == "PAPER"),
+        "logged_in": _state.get("logged_in", False),
+        "user_name": _state.get("user_name", ""),
+        "user_id": _state.get("user_id", ""),
+        "universe": algo_cfg.get("universe", "all_stocks"),
+        "risk_config": risk_cfg,
+        "paper_summary": paper_summary,
+        "broker_margins": _get_live_kite_margins(),
+    })
 
 
 @app.route("/api/algo/config", methods=["GET", "POST"])
@@ -843,6 +1047,93 @@ def api_algo_strategy_analytics():
     strat_id = request.args.get("strat_id", "momentum_trend")
     days = request.args.get("days", "1")
     return jsonify(engine.get_strategy_analytics(strat_id=strat_id, days=days))
+
+
+@app.route("/api/algo/custom_scanner_stocks")
+def api_algo_custom_scanner_stocks():
+    """Returns live qualified stocks matching the 4-filter Pre-Market, Sector & OI strategy"""
+    engine = _state.get("algo_engine")
+    if not engine:
+        return jsonify({"success": False, "error": "Algo engine not initialized", "stocks": []})
+    return jsonify(engine.get_custom_strategy_scan_candidates())
+
+
+# ═══════════════════════════════════════════════════════════════
+# MCX COMMODITY ALGO API ROUTES
+# ═══════════════════════════════════════════════════════════════
+
+@app.route("/api/mcx/status")
+def api_mcx_status():
+    """Returns live MCX commodity rates, market status, positions, and signals"""
+    engine = _state.get("mcx_engine")
+    if not engine:
+        return jsonify({"success": False, "error": "MCX engine not initialized"})
+    return jsonify(engine.get_status())
+
+
+@app.route("/api/mcx/toggle", methods=["POST"])
+def api_mcx_toggle():
+    """Starts or pauses the MCX Algo Bot"""
+    engine = _state.get("mcx_engine")
+    if not engine:
+        return jsonify({"success": False, "error": "MCX engine not initialized"})
+    return jsonify(engine.toggle())
+
+
+@app.route("/api/mcx/mode", methods=["POST"])
+def api_mcx_mode():
+    """Switches MCX mode between PAPER and LIVE"""
+    engine = _state.get("mcx_engine")
+    if not engine:
+        return jsonify({"success": False, "error": "MCX engine not initialized"})
+    data = request.get_json() or {}
+    mode = data.get("mode", "PAPER")
+    return jsonify(engine.set_mode(mode))
+
+
+@app.route("/api/mcx/order", methods=["POST"])
+def api_mcx_order():
+    """Places a paper or live order on an MCX commodity"""
+    engine = _state.get("mcx_engine")
+    if not engine:
+        return jsonify({"success": False, "error": "MCX engine not initialized"})
+    data = request.get_json() or {}
+    commodity = data.get("commodity", "")
+    side = data.get("side", "BUY")
+    quantity = int(data.get("quantity", 1))
+    return jsonify(engine.place_order(commodity=commodity, side=side, quantity=quantity))
+
+
+@app.route("/api/mcx/exit", methods=["POST"])
+def api_mcx_exit():
+    """Exits an active MCX position"""
+    engine = _state.get("mcx_engine")
+    if not engine:
+        return jsonify({"success": False, "error": "MCX engine not initialized"})
+    data = request.get_json() or {}
+    pos_id = data.get("pos_id", "")
+    return jsonify(engine.exit_position(pos_id=pos_id, reason="MANUAL_EXIT"))
+
+
+@app.route("/api/mcx/scan_now", methods=["POST"])
+def api_mcx_scan_now():
+    """Triggers an on-demand quantitative scan across all enabled commodities"""
+    engine = _state.get("mcx_engine")
+    if not engine:
+        return jsonify({"success": False, "error": "MCX engine not initialized"})
+    return jsonify(engine.force_scan_now())
+
+
+@app.route("/api/mcx/commodity/toggle", methods=["POST"])
+def api_mcx_commodity_toggle():
+    """Toggles auto-trading on/off for a specific commodity"""
+    engine = _state.get("mcx_engine")
+    if not engine:
+        return jsonify({"success": False, "error": "MCX engine not initialized"})
+    data = request.get_json() or {}
+    commodity = data.get("commodity", "")
+    enabled = bool(data.get("enabled", True))
+    return jsonify(engine.update_commodity_config(commodity, {"enabled": enabled}))
 
 
 # Legacy bot routes wired to algo engine
@@ -1166,21 +1457,21 @@ NSE_FNO_SYMBOLS = {
     "DALBHARAT", "DEEPAKNTR", "DELHIVERY", "DIVISLAB", "DIXON", "DLF", "DRREDDY",
     "EICHERMOT", "ESCORTS", "EXIDEIND", "FEDERALBNK", "GAIL", "GLENMARK",
     "GMRINFRA", "GNFC", "GODREJCP", "GODREJPROP", "GRANULES", "GRASIM",
-    "GUJGASLTD", "HAL", "HAVELLS", "HCLTECH", "HDFCAMC", "HDFCBANK", "HDFCLIFE",
+    "FLUOROCHEM", "HAL", "HAVELLS", "HCLTECH", "HDFCAMC", "HDFCBANK", "HDFCLIFE",
     "HEROMOTOCO", "HINDALCO", "HINDPETRO", "HINDUNILVR", "ICICIBANK", "ICICIGI",
     "ICICIPRULI", "IDEA", "IDFCFIRSTB", "IEX", "IGL", "INDHOTEL", "INDIACEM",
     "INDIAMART", "INDIANB", "INDIGO", "INDUSINDBK", "INDUSTOWER", "INFY", "IOC",
     "IPCALAB", "IRCTC", "ITC", "JINDALSTEL", "JKCEMENT", "JSWENERGY",
     "JSWSTEEL", "JUBLFOOD", "KOTAKBANK", "LALPATHLAB", "LAURUSLABS", "LICHSGFIN",
     "LT", "LTIM", "LTTS", "LUPIN", "M&M", "M&MFIN", "MANAPPURAM", "MARICO",
-    "MARUTI", "MCDOWELL-N", "MCX", "METROPOLIS", "MFSL", "MGL", "MOTHERSON",
+    "MARUTI", "UNITDSPR", "MCX", "METROPOLIS", "MFSL", "MGL", "MOTHERSON",
     "MPHASIS", "MRF", "MUTHOOTFIN", "NATIONALUM", "NAUKRI", "NAVINFLUOR",
-    "NESTLEIND", "NMDC", "NTPC", "OBEROIRLTY", "OFSS", "ONGC", "PAGEIND", "PEL",
+    "NESTLEIND", "NMDC", "NTPC", "OBEROIRLTY", "OFSS", "ONGC", "PAGEIND", "PIRAMALFIN",
     "PERSISTENT", "PETRONET", "PFC", "PIDILITIND", "PIIND", "PNB", "POLYCAB",
     "POWERGRID", "PRESTIGE", "PVRINOX", "RAMCOCEM", "RBLBANK", "RECLTD",
     "RELIANCE", "SAIL", "SBICARD", "SBILIFE", "SBIN", "SHREECEM", "SHRIRAMFIN",
     "SIEMENS", "SRF", "SUNPHARMA", "SUNTV", "SYNGENE", "TATACHEM", "TATACOMM",
-    "TATACONSUM", "TATAMOTORS", "TATAPOWER", "TATASTEEL", "TCS", "TECHM",
+    "TATACONSUM", "TMCV", "TMPV", "TATAPOWER", "TATASTEEL", "TCS", "TECHM",
     "TITAN", "TORNTPHARM", "TORNTPOWER", "TRENT", "TVSMOTOR", "UBL",
     "ULTRACEMCO", "UNIONBANK", "UPL", "VEDL", "VOLTAS", "WIPRO", "ZEEL", "ZYDUSLIFE"
 }
@@ -1199,14 +1490,22 @@ def _get_fno_symbols(kite=None) -> set:
     if kite:
         try:
             nfo_instruments = kite.instruments("NFO")
-            indices = {"NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY", "NIFTYNXT50"}
+            nse_instruments = kite.instruments("NSE")
+            valid_nse_eq = {
+                inst.get("tradingsymbol", "").strip().upper()
+                for inst in nse_instruments
+                if inst.get("instrument_type") == "EQ" and inst.get("tradingsymbol")
+            }
+            indices = {"NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY", "NIFTYNXT50", "NIFTYFPI", "NIFTYIT"}
             dyn_symbols = {
                 inst.get("name", "").strip().upper()
                 for inst in nfo_instruments
                 if inst.get("name") and inst.get("name").strip().upper() not in indices
             }
-            if len(dyn_symbols) > 50:
-                fno_set.update(dyn_symbols)
+            # Only include dynamic symbols that actually exist as NSE EQ instruments
+            valid_dyn = {s for s in dyn_symbols if s in valid_nse_eq}
+            if len(valid_dyn) > 20:
+                fno_set.update(valid_dyn)
                 logger.info(f"Loaded {len(fno_set)} active F&O equity underlyings from Kite NFO")
         except Exception as e:
             logger.debug(f"Kite NFO instruments fetch skipped/failed: {e}")
@@ -1732,7 +2031,7 @@ def _resolve_symbols(query) -> list:
         "HCLTECH","MARUTI","SUNPHARMA","TITAN","ADANIPORTS","ULTRACEMCO",
         "AXISBANK","WIPRO","NESTLEIND","DMART","ASIANPAINT","BAJAJFINSV",
         "POWERGRID","NTPC","TECHM","ONGC","COALINDIA","JSWSTEEL",
-        "TATAMOTORS","HINDALCO","TATASTEEL","DIVISLAB","CIPLA",
+        "TMCV","TMPV","HINDALCO","TATASTEEL","DIVISLAB","CIPLA",
         "DRREDDY","APOLLOHOSP","BPCL","EICHERMOT","GRASIM",
         "HEROMOTOCO","INDUSINDBK","M&M","SBILIFE","HDFCLIFE",
         "BAJAJ-AUTO","BRITANNIA","UPL","VEDL","ADANIENT"
@@ -1742,9 +2041,9 @@ def _resolve_symbols(query) -> list:
         "BERGEPAINT","BOSCHLTD","CANBK","CHOLAFIN","COLPAL",
         "DABUR","DLF","GAIL","GODREJCP","HAVELLS","ICICIPRULI",
         "INDIGO","IOC","IRCTC","JUBLFOOD","LUPIN","MARICO",
-        "MCDOWELL-N","MUTHOOTFIN","NAUKRI","NMDC","PAGEIND",
+        "UNITDSPR","MUTHOOTFIN","NAUKRI","NMDC","PAGEIND",
         "PETRONET","PIDILITIND","RECLTD","SAIL","SIEMENS","SRF",
-        "TATACONSUM","TATAPOWER","TORNTPHARM","TRENT","TVSMOTORS",
+        "TATACONSUM","TATAPOWER","TORNTPHARM","TRENT","TVSMOTOR",
         "UBL","UNIONBANK","VBL","VOLTAS","ZYDUSLIFE",
         "IDFCFIRSTB","GODREJPROP","TRIDENT","WHIRLPOOL"
     ]
@@ -1753,11 +2052,11 @@ def _resolve_symbols(query) -> list:
         "BATAINDIA","BSOFT","CANFINHOME","CDSL","COFORGE",
         "CROMPTON","CUMMINSIND","DEEPAKNTR","DIXON","EMAMILTD",
         "ESCORTS","EXIDEIND","FEDERALBNK","GLENMARK","HAL",
-        "IBULHSGFIN","IGL","INDHOTEL","IPCA","JKCEMENT",
+        "IBULHSGFIN","IGL","INDHOTEL","IPCALAB","JKCEMENT",
         "JUBILANT","KAJARIACER","KPITTECH","LAURUSLABS","LICHSGFIN",
         "MANAPPURAM","MRF","NBCC","PERSISTENT","PHOENIXLTD",
         "POLYCAB","RAMCOCEM","ROUTE","SBICARD","SUPREMEIND",
-        "TATAELXSI","THERMAX","TORNTPOWER","TVSMOTORS","UJJIVANSFB",
+        "TATAELXSI","THERMAX","TORNTPOWER","TVSMOTOR","UJJIVANSFB",
         "VARROC","VGUARD","ZOMATO","NAUKRI","AAVAS"
     ]
     NIFTY_MIDCAP150 = [
@@ -1766,13 +2065,13 @@ def _resolve_symbols(query) -> list:
         "BHARATFORG","BIOCON","BSOFT","CANFINHOME","CDSL",
         "CESC","COFORGE","CONCOR","CROMPTON","CUMMINSIND",
         "DEEPAKNTR","DIXON","EMAMILTD","ESCORTS","EXIDEIND",
-        "FEDERALBNK","GLENMARK","GNFC","GRANULES","GUJGASLTD",
-        "HAL","HONAUT","IBULHSGFIN","IGL","INDHOTEL","IPCA",
+        "FEDERALBNK","GLENMARK","GNFC","GRANULES","FLUOROCHEM",
+        "HAL","HONAUT","IBULHSGFIN","IGL","INDHOTEL","IPCALAB",
         "JKCEMENT","JSWENERGY","JUBILANT","KAJARIACER","KPITTECH",
         "LALPATHLAB","LAURUSLABS","LICHSGFIN","MANAPPURAM",
         "NBCC","PERSISTENT","PHOENIXLTD","POLYCAB","RAMCOCEM",
         "ROUTE","SBICARD","SUPREMEIND","SYNGENE","TATAELXSI",
-        "THERMAX","TORNTPOWER","TVSMOTORS","UJJIVANSFB",
+        "THERMAX","TORNTPOWER","TVSMOTOR","UJJIVANSFB",
         "ZOMATO","NAUKRI","RITES","STAR","SUNDARMFIN","TATACHEM"
     ]
     NIFTY_SMALLCAP100 = [
@@ -1809,7 +2108,7 @@ def _resolve_symbols(query) -> list:
         "ITC","SBIN","BHARTIARTL","KOTAKBANK","LT","BAJFINANCE",
         "HCLTECH","MARUTI","SUNPHARMA","TITAN","ULTRACEMCO","AXISBANK",
         "WIPRO","NESTLEIND","ASIANPAINT","BAJAJFINSV","POWERGRID",
-        "NTPC","TECHM","ONGC","TATAMOTORS","TATASTEEL","INDUSINDBK","M&M"
+        "NTPC","TECHM","ONGC","TMCV","TATASTEEL","INDUSINDBK","M&M"
     ]
     BSE100 = NIFTY_50 + NIFTY_NEXT_50
 
@@ -1818,10 +2117,10 @@ def _resolve_symbols(query) -> list:
         "it_technology":         ["TCS","INFY","HCLTECH","WIPRO","TECHM","LTIM","MPHASIS","COFORGE","PERSISTENT","OFSS","KPITTECH","TATAELXSI","BSOFT","MASTEK","HAPPSTMNDS","LATENTVIEW"],
         "banking":               ["HDFCBANK","ICICIBANK","KOTAKBANK","AXISBANK","SBIN","INDUSINDBK","BANDHANBNK","FEDERALBNK","IDFCFIRSTB","AUBANK","PNB","BANKBARODA","CANBK","UNIONBANK","INDIANB"],
         "financial_services":    ["BAJFINANCE","BAJAJFINSV","HDFCLIFE","SBILIFE","ICICIPRULI","MUTHOOTFIN","CHOLAFIN","RECLTD","PFC","LICHSGFIN","SBICARD","MANAPPURAM","CANFINHOME","ABCAPITAL"],
-        "auto_ev":               ["MARUTI","TATAMOTORS","M&M","BAJAJ-AUTO","HEROMOTOCO","EICHERMOT","TVSMOTORS","ASHOKLEY","BOSCHLTD","MOTHERSON","EXIDEIND","BALKRISIND","ESCORTS","OLECTRA","ATHER"],
-        "pharma_healthcare":     ["SUNPHARMA","DIVISLAB","CIPLA","DRREDDY","APOLLOHOSP","ALKEM","TORNTPHARM","LUPIN","AUROPHARMA","IPCA","BIOCON","LALPATHLAB","METROPOLIS","SYNGENE","LAURUSLABS","ZYDUSLIFE"],
-        "fmcg_consumer":         ["HINDUNILVR","ITC","NESTLEIND","BRITANNIA","DABUR","MARICO","GODREJCP","COLPAL","EMAMILTD","TATACONSUM","VBL","UBL","MCDOWELL-N","BIKAJI"],
-        "oil_gas_energy":        ["RELIANCE","ONGC","BPCL","IOC","GAIL","PETRONET","HINDPETRO","NTPC","POWERGRID","TATAPOWER","ADANIPOWER","ADANIGREEN","JSWENERGY","CESC","TORNTPOWER","IGL","GUJGASLTD"],
+        "auto_ev":               ["MARUTI","TMCV","TMPV","M&M","BAJAJ-AUTO","HEROMOTOCO","EICHERMOT","TVSMOTOR","ASHOKLEY","BOSCHLTD","MOTHERSON","EXIDEIND","BALKRISIND","ESCORTS","OLECTRA","ATHER"],
+        "pharma_healthcare":     ["SUNPHARMA","DIVISLAB","CIPLA","DRREDDY","APOLLOHOSP","ALKEM","TORNTPHARM","LUPIN","AUROPHARMA","IPCALAB","BIOCON","LALPATHLAB","METROPOLIS","SYNGENE","LAURUSLABS","ZYDUSLIFE"],
+        "fmcg_consumer":         ["HINDUNILVR","ITC","NESTLEIND","BRITANNIA","DABUR","MARICO","GODREJCP","COLPAL","EMAMILTD","TATACONSUM","VBL","UBL","UNITDSPR","BIKAJI"],
+        "oil_gas_energy":        ["RELIANCE","ONGC","BPCL","IOC","GAIL","PETRONET","HINDPETRO","NTPC","POWERGRID","TATAPOWER","ADANIPOWER","ADANIGREEN","JSWENERGY","CESC","TORNTPOWER","IGL","FLUOROCHEM"],
         "metals_mining":         ["TATASTEEL","HINDALCO","JSWSTEEL","VEDL","COALINDIA","NMDC","SAIL","HINDZINC","NATIONALUM","APLAPOLLO","GPIL","JINDALSTEL"],
         "real_estate":           ["DLF","GODREJPROP","PHOENIXLTD","BRIGADE","PRESTIGE","SOBHA","IBREALEST","MAHLIFE","OBEROIRLTY","SUNTECK","KOLTEPATIL"],
         "infrastructure_capgoods":["LT","ABB","SIEMENS","BEL","HAL","BHEL","THERMAX","CUMMINSIND","SCHAEFFLER","KEC","KALPATPOWR","NBCC","RITES","GRINDWELL"],
@@ -1873,16 +2172,26 @@ def _resolve_symbols(query) -> list:
             kite = _state.get("kite")
             if kite:
                 instruments = kite.instruments("NSE")
-                eq_stocks = [
-                    inst["tradingsymbol"]
-                    for inst in instruments
-                    if inst.get("instrument_type") == "EQ"
-                    and inst.get("segment") == "NSE"
-                    and inst.get("tradingsymbol")
-                ]
-                if eq_stocks:
-                    _cached_all_nse_symbols = sorted(list(dict.fromkeys(eq_stocks)))
-                    logger.info(f"Loaded {len(_cached_all_nse_symbols)} NSE EQ stocks for All Stocks scan")
+                import re
+                debt_re = re.compile(r'(-\d|-[A-Z]\d|GS\d|\d{4}|SGB)')
+                clean_eq = []
+                for inst in instruments:
+                    if inst.get("instrument_type") != "EQ" or inst.get("segment") != "NSE":
+                        continue
+                    sym = (inst.get("tradingsymbol") or "").strip().upper()
+                    if not sym or sym[0].isdigit() or debt_re.search(sym):
+                        continue
+                    if sym.endswith(("-RE", "-IV", "-RR", "-PP", "-GB")):
+                        continue
+                    clean_eq.append(sym)
+
+                if clean_eq:
+                    # Guarantee major market leaders (F&O stocks & Benchmark Index constituents) are scanned FIRST
+                    fno_list = list(_get_fno_symbols(kite))
+                    leaders = list(dict.fromkeys(fno_list + all_predefined))
+                    remaining = [s for s in sorted(clean_eq) if s not in set(leaders)]
+                    _cached_all_nse_symbols = leaders + remaining
+                    logger.info(f"Loaded {len(_cached_all_nse_symbols)} clean NSE EQ stocks (with {len(leaders)} market leaders prioritized) for All Stocks scan")
                     return _cached_all_nse_symbols
         except Exception as e:
             logger.warning(f"Failed to fetch all NSE instruments: {e}")
@@ -2300,7 +2609,11 @@ def api_trade_funds():
     if not _state["kite"]:
         return jsonify({"available": 0, "used": 0, "net": 0})
 
-    if IS_PAPER_TRADING:
+    is_live_mode = (TRADING_MODE == "LIVE")
+    if _state.get("algo_engine") and getattr(_state["algo_engine"], "mode", None) == "LIVE":
+        is_live_mode = True
+
+    if not is_live_mode:
         portfolio = _state.get("paper_portfolio")
         if portfolio:
             summary = portfolio.get_margin_summary(_state.get("kite"), TOTAL_CAPITAL)
@@ -2322,10 +2635,25 @@ def api_trade_funds():
     try:
         margins = _state["kite"].margins()
         equity  = margins.get("equity", {})
+        comm    = margins.get("commodity", {})
+
+        eq_avail = float(equity.get("available", {}).get("live_balance", 0) or equity.get("available", {}).get("cash", 0) or equity.get("net", 0) or 0)
+        eq_used  = float(equity.get("utilised",  {}).get("debits", 0) or 0)
+        eq_net   = float(equity.get("net", 0) or 0)
+
+        comm_avail = float(comm.get("available", {}).get("live_balance", 0) or comm.get("available", {}).get("cash", 0) or comm.get("net", 0) or 0)
+        comm_used  = float(comm.get("utilised",  {}).get("debits", 0) or 0)
+        comm_net   = float(comm.get("net", 0) or 0)
+
         return jsonify({
-            "available": equity.get("available", {}).get("cash", 0),
-            "used":      equity.get("utilised",  {}).get("debits", 0),
-            "net":       equity.get("net", 0),
+            "available": eq_avail,
+            "used":      eq_used,
+            "net":       eq_net,
+            "commodity_available": comm_avail,
+            "commodity_used": comm_used,
+            "commodity_net": comm_net,
+            "total_available": eq_avail + comm_avail,
+            "paper_mode": False,
         })
     except Exception as e:
         logger.error(f"Funds error: {e}")
@@ -2342,12 +2670,13 @@ def api_paper_positions():
     Paper trading positions with live P&L.
     Returns: [{"symbol", "quantity", "avg_price", "ltp", "pnl", "pnl_pct", ...}]
     """
-    if not IS_PAPER_TRADING:
-        return jsonify({"positions": [], "error": "Not in paper mode"})
-
     portfolio = _state.get("paper_portfolio")
     if not portfolio:
-        return jsonify({"positions": [], "error": "Portfolio not initialized"})
+        try:
+            _state["paper_portfolio"] = PaperPortfolio()
+            portfolio = _state["paper_portfolio"]
+        except Exception:
+            return jsonify({"positions": [], "error": "Portfolio not initialized"})
 
     try:
         kite = _state.get("kite")
@@ -2377,12 +2706,13 @@ def api_paper_orders():
     Paper trading order history.
     Returns: [{"order_id", "symbol", "transaction", "quantity", "price", "timestamp", ...}]
     """
-    if not IS_PAPER_TRADING:
-        return jsonify({"orders": [], "error": "Not in paper mode"})
-
     portfolio = _state.get("paper_portfolio")
     if not portfolio:
-        return jsonify({"orders": [], "error": "Portfolio not initialized"})
+        try:
+            _state["paper_portfolio"] = PaperPortfolio()
+            portfolio = _state["paper_portfolio"]
+        except Exception:
+            return jsonify({"orders": [], "error": "Portfolio not initialized"})
 
     try:
         limit  = int(request.args.get("limit", 50))
@@ -2403,12 +2733,13 @@ def api_paper_exit():
     Close a paper trading position.
     POST body: {"symbol": "RELIANCE", "price": 2500}  # price optional
     """
-    if not IS_PAPER_TRADING:
-        return jsonify({"success": False, "error": "Not in paper mode"})
-
     portfolio = _state.get("paper_portfolio")
     if not portfolio:
-        return jsonify({"success": False, "error": "Portfolio not initialized"})
+        try:
+            _state["paper_portfolio"] = PaperPortfolio()
+            portfolio = _state["paper_portfolio"]
+        except Exception:
+            return jsonify({"success": False, "error": "Portfolio not initialized"})
 
     body   = request.get_json(silent=True) or {}
     symbol = body.get("symbol", "").upper().strip()
@@ -2440,18 +2771,27 @@ def api_paper_exit():
 @app.route("/api/trade/paper_reset", methods=["POST"])
 def api_paper_reset():
     """Reset paper portfolio - clear all positions and orders"""
-    if not IS_PAPER_TRADING:
-        return jsonify({"success": False, "error": "Not in paper mode"})
-
     portfolio = _state.get("paper_portfolio")
     if not portfolio:
-        return jsonify({"success": False, "error": "Portfolio not initialized"})
+        try:
+            _state["paper_portfolio"] = PaperPortfolio()
+            portfolio = _state["paper_portfolio"]
+        except Exception:
+            return jsonify({"success": False, "error": "Portfolio not initialized"})
 
     try:
         portfolio.reset()
+        # Also clear any paper trades from algo engine if available
+        algo = _state.get("algo_engine")
+        if algo and hasattr(algo, "clear_closed_trades"):
+            try:
+                algo.clear_closed_trades()
+            except Exception:
+                pass
+
         return jsonify({
             "success": True,
-            "message": "Paper portfolio reset complete",
+            "message": "Paper portfolio and trade history reset successfully",
         })
     except Exception as e:
         logger.error(f"Paper reset error: {e}")
@@ -2503,9 +2843,9 @@ _SECTOR_MAP = {
     "IT & Technology":          ["TCS","INFY","HCLTECH","WIPRO","TECHM","MPHASIS","COFORGE","PERSISTENT","OFSS","KPITTECH","TATAELXSI","BSOFT","MASTEK","HAPPSTMNDS","LATENTVIEW"],
     "Banking":                  ["HDFCBANK","ICICIBANK","KOTAKBANK","AXISBANK","SBIN","INDUSINDBK","BANDHANBNK","FEDERALBNK","IDFCFIRSTB","AUBANK","PNB","BANKBARODA","CANBK","UNIONBANK"],
     "Financial Services":       ["BAJFINANCE","BAJAJFINSV","HDFCLIFE","SBILIFE","ICICIPRULI","MUTHOOTFIN","CHOLAFIN","RECLTD","PFC","LICHSGFIN","SBICARD","MANAPPURAM","CANFINHOME"],
-    "Auto & EV":                ["MARUTI","TATAMOTORS","M&M","BAJAJ-AUTO","HEROMOTOCO","EICHERMOT","TVSMOTORS","BOSCHLTD","MOTHERSON","EXIDEIND","BALKRISIND","ESCORTS"],
-    "Pharma & Healthcare":      ["SUNPHARMA","DIVISLAB","CIPLA","DRREDDY","APOLLOHOSP","ALKEM","TORNTPHARM","LUPIN","AUROPHARMA","IPCA","BIOCON","LALPATHLAB","SYNGENE","ZYDUSLIFE"],
-    "FMCG & Consumer":          ["HINDUNILVR","ITC","NESTLEIND","BRITANNIA","DABUR","MARICO","GODREJCP","COLPAL","EMAMILTD","TATACONSUM","VBL","UBL","MCDOWELL-N"],
+    "Auto & EV":                ["MARUTI","TMCV","TMPV","M&M","BAJAJ-AUTO","HEROMOTOCO","EICHERMOT","TVSMOTOR","BOSCHLTD","MOTHERSON","EXIDEIND","BALKRISIND","ESCORTS"],
+    "Pharma & Healthcare":      ["SUNPHARMA","DIVISLAB","CIPLA","DRREDDY","APOLLOHOSP","ALKEM","TORNTPHARM","LUPIN","AUROPHARMA","IPCALAB","BIOCON","LALPATHLAB","SYNGENE","ZYDUSLIFE"],
+    "FMCG & Consumer":          ["HINDUNILVR","ITC","NESTLEIND","BRITANNIA","DABUR","MARICO","GODREJCP","COLPAL","EMAMILTD","TATACONSUM","VBL","UBL","UNITDSPR"],
     "Oil, Gas & Energy":        ["RELIANCE","ONGC","BPCL","IOC","GAIL","PETRONET","NTPC","POWERGRID","TATAPOWER","ADANIPOWER","ADANIGREEN","JSWENERGY","CESC","IGL"],
     "Metals & Mining":          ["TATASTEEL","HINDALCO","JSWSTEEL","VEDL","COALINDIA","NMDC","SAIL","HINDZINC","NATIONALUM","GPIL"],
     "Real Estate":              ["DLF","GODREJPROP","PHOENIXLTD","BRIGADE","PRESTIGE","SOBHA","OBEROIRLTY","SUNTECK"],

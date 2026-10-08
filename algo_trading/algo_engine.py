@@ -42,6 +42,20 @@ IST = pytz.timezone("Asia/Kolkata")
 # Storage file for persistent algo metrics & settings
 STATE_FILE = Path(__file__).resolve().parent / "data" / "algo_state.json"
 
+# Sector Mapping for Bullish Sector Analysis
+SECTOR_MAP = {
+    "IT & Tech":                ["TCS", "INFY", "HCLTECH", "WIPRO", "TECHM", "LTIM", "COFORGE", "PERSISTENT", "MPHASIS", "KPITTECH", "TATAELXSI", "OFSS"],
+    "Banking & Financials":     ["HDFCBANK", "ICICIBANK", "SBIN", "KOTAKBANK", "AXISBANK", "INDUSINDBK", "BANKBARODA", "PNB", "FEDERALBNK", "IDFCFIRSTB", "BAJFINANCE", "BAJAJFINSV", "HDFCLIFE", "SBILIFE", "CHOLAFIN", "MUTHOOTFIN", "RECLTD", "PFC"],
+    "Auto & EV":                ["MARUTI", "TMCV", "TMPV", "M&M", "BAJAJ-AUTO", "HEROMOTOCO", "EICHERMOT", "TVSMOTOR", "ASHOKLEY", "BHARATFORG", "MOTHERSON", "BOSCHLTD"],
+    "Pharma & Healthcare":      ["SUNPHARMA", "CIPLA", "DRREDDY", "DIVISLAB", "APOLLOHOSP", "LUPIN", "AUROPHARMA", "TORNTPHARM", "ZYDUSLIFE", "ALKEM", "BIOCON", "MANKIND"],
+    "FMCG & Consumption":       ["HINDUNILVR", "ITC", "NESTLEIND", "BRITANNIA", "TATACONSUM", "DABUR", "MARICO", "GODREJCP", "COLPAL", "VBL", "UNITDSPR"],
+    "Metals & Mining":          ["TATASTEEL", "JSWSTEEL", "HINDALCO", "VEDL", "COALINDIA", "JINDALSTEL", "NMDC", "NATIONALUM", "SAIL", "APLAPOLLO"],
+    "Oil, Gas & Energy":        ["RELIANCE", "ONGC", "BPCL", "IOC", "GAIL", "PETRONET", "NTPC", "POWERGRID", "TATAPOWER", "ADANIPOWER", "ADANIGREEN", "JSWENERGY", "CESC", "IGL"],
+    "Real Estate & Infra":      ["DLF", "GODREJPROP", "PHOENIXLTD", "BRIGADE", "PRESTIGE", "SOBHA", "OBEROIRLTY", "SUNTECK", "LT", "ABB", "SIEMENS", "BEL", "HAL", "BHEL"],
+    "Chemicals & Fertilizers":  ["PIDILITIND", "SRF", "DEEPAKNTR", "AARTIIND", "NAVINFLUOR", "PIIND", "UPL", "COROMANDEL", "TATACHEM", "FLUOROCHEM"],
+    "Consumer Durables & Media":["TITAN", "HAVELLS", "VOLTAS", "DIXON", "CROMPTON", "POLYCAB", "KEI", "BHARTIARTL", "IDEA", "INDUSTOWER", "ZEEL", "PVRINOX"]
+}
+
 
 def calculate_trade_charges(product: str, quantity: int, buy_price: float, sell_price: float) -> dict:
     """
@@ -133,31 +147,38 @@ def calculate_setup_win_rate(
     target_1_pct: float = 1.0,
     sl_pct: float = 0.8,
     avg_price: float = 0.0,
+    volume: int = 0,
 ) -> dict:
     """
     Computes a quantitative Win Rate / Probability Score (0.0% to 100.0%) for an intraday technical setup.
-    Orders are ONLY executed when the setup win rate is >= min_win_rate_pct (default: 60.0%).
+    Evaluates:
+    - Relative Strength & Day Change % (+0.8% to +3.5% = strongest institutional edge)
+    - Proximity to Day High (Range Position >= 80% = genuine expansion, never buy bottom half)
+    - Institutional VWAP alignment & support
+    - Volume surge confirmation
+    - Risk-Reward ratio
     """
     base_rates = {
-        "vwap_sniper": 65.0,        # Institutional VWAP Demand Zone Rebound (High Edge)
-        "orb_breakout": 63.0,       # 15-Minute Opening Range Expansion Breakout
-        "breakout_surge": 62.0,
-        "momentum_trend": 58.0,
-        "supertrend_rider": 59.0,
-        "open_reversal": 60.0,
-        "rsi_reversion": 56.0,
+        "custom_quant_momentum": 66.0,
+        "breakout_surge": 64.0,
+        "orb_breakout": 63.0,
+        "vwap_sniper": 62.0,
+        "momentum_trend": 60.0,
+        "supertrend_rider": 58.0,
+        "open_reversal": 56.0,
+        "rsi_reversion": 54.0,
     }
     score = base_rates.get(strat_id, 58.0)
 
     # 1. Risk-to-Reward Ratio Confluence (Target / Stop Loss)
     if sl_pct > 0:
         rr = target_1_pct / sl_pct
-        if rr >= 1.8:
-            score += 6.5
-        elif rr >= 1.4:
-            score += 3.5
+        if rr >= 1.6:
+            score += 6.0
+        elif rr >= 1.2:
+            score += 3.0
         elif rr < 1.0:
-            score -= 6.0
+            score -= 8.0
 
     # 2. Intraday Range Position (Buying near high of the day vs bottom)
     day_range = high_p - low_p
@@ -165,69 +186,110 @@ def calculate_setup_win_rate(
         pos_ratio = (ltp - low_p) / day_range
         if side == "BUY":
             if pos_ratio >= 0.85:   # Strong breakout near day high
-                score += 5.5
+                score += 8.0
             elif pos_ratio >= 0.70:
-                score += 3.0
-            elif pos_ratio < 0.45: # Weak setup trading in bottom half
-                if strat_id != "vwap_sniper":
-                    score -= 8.0
-            elif strat_id == "vwap_sniper" and 0.45 <= pos_ratio <= 0.80:
-                score += 4.0  # Optimal wholesale value zone for institutional pullback
+                score += 4.0
+            elif pos_ratio < 0.50:  # Weak setup trading in bottom half
+                score -= 14.0
         else: # SELL / SHORT
             if pos_ratio <= 0.15:
-                score += 5.5
+                score += 8.0
             elif pos_ratio <= 0.30:
-                score += 3.0
-            elif pos_ratio > 0.55:
-                score -= 8.0
+                score += 4.0
+            elif pos_ratio > 0.50:
+                score -= 14.0
 
-    # 3. Trend Alignment against previous close
+    # 3. Day Trend Strength against previous close
     if prev_close > 0:
         day_chg = ((ltp - prev_close) / prev_close) * 100.0
         if side == "BUY":
-            if 0.6 <= day_chg <= 3.2:
-                score += 4.5
-            elif day_chg > 4.5:    # Overbought exhaustion risk
-                score -= 7.0
-            elif day_chg < 0:      # Fighting the day's trend
-                score -= 6.0
+            if 1.0 <= day_chg <= 3.8:   # Ideal sweet spot of strong relative strength
+                score += 8.0
+            elif 0.6 <= day_chg < 1.0:
+                score += 4.0
+            elif day_chg > 5.5:         # Overextended exhaustion risk
+                score -= 8.0
+            elif day_chg < 0:           # Counter-trend trap
+                score -= 14.0
         else: # SELL
-            if -3.2 <= day_chg <= -0.6:
-                score += 4.5
-            elif day_chg < -4.5:
-                score -= 7.0
+            if -3.8 <= day_chg <= -1.0:
+                score += 8.0
+            elif -1.0 < day_chg <= -0.6:
+                score += 4.0
+            elif day_chg < -5.5:
+                score -= 8.0
             elif day_chg > 0:
-                score -= 6.0
+                score -= 14.0
 
-    # 4. Open price alignment
+    # 4. Open price confirmation
     if open_p > 0:
         open_gain = ((ltp - open_p) / open_p) * 100.0
-        if side == "BUY" and open_gain > 0.3:
-            score += 2.5
-        elif side == "SELL" and open_gain < -0.3:
-            score += 2.5
+        if side == "BUY":
+            if open_gain >= 0.6:
+                score += 4.0
+            elif open_gain < 0:
+                score -= 8.0
+        elif side == "SELL":
+            if open_gain <= -0.6:
+                score += 4.0
+            elif open_gain > 0:
+                score -= 8.0
 
     # 5. VWAP Institutional Trend Confluence (Buy strictly above VWAP, Sell strictly below VWAP)
     effective_vwap = avg_price if avg_price > 0 else (open_p + high_p + low_p) / 3.0
     if effective_vwap > 0:
         if side == "BUY":
             if ltp >= effective_vwap:
-                score += 8.0  # Holding above institutional VWAP
-                dist = abs(ltp - effective_vwap) / effective_vwap * 100.0
-                if dist <= 0.60:
-                    score += 4.0  # Sweet-spot bounce off VWAP support
-            else:
-                score -= 14.0 # Trapped below VWAP (seller dominated)
-        else: # SELL
-            if ltp <= effective_vwap:
-                score += 8.0
-                dist = abs(ltp - effective_vwap) / effective_vwap * 100.0
-                if dist <= 0.60:
+                dist = (ltp - effective_vwap) / effective_vwap * 100.0
+                if 0.1 <= dist <= 1.8:   # Healthy distance above VWAP
+                    score += 8.0
+                elif dist > 3.5:         # Too far extended from VWAP
+                    score -= 4.0
+                else:
                     score += 4.0
             else:
-                score -= 14.0
+                score -= 16.0  # Strictly penalize buying below VWAP
+        else: # SELL
+            if ltp <= effective_vwap:
+                dist = (effective_vwap - ltp) / effective_vwap * 100.0
+                if 0.1 <= dist <= 1.8:
+                    score += 8.0
+                elif dist > 3.5:
+                    score -= 4.0
+                else:
+                    score += 4.0
+            else:
+                score -= 16.0
+
+    # 6. Volume Surge Confluence
+    if volume > 0:
+        if volume >= 250000:
+            score += 7.0
+        elif volume >= 100000:
+            score += 4.0
+        elif volume >= 40000:
+            score += 2.0
+        elif volume < 15000:
+            score -= 8.0   # Illiquid trap
 
     final_score = round(max(10.0, min(95.0, score)), 1)
+
+    # ── OPENING VOLATILITY TIME PENALTY ──────────────────────────────────────────
+    # 9:30 AM - 9:45 AM: Market opening is extremely volatile.
+    # OHLC data is incomplete, VWAP unreliable, false breakouts are common.
+    # Apply progressive penalty: strongest in first 5 minutes, reducing by 9:45.
+    # Note: custom_quant_momentum is specifically tuned for early morning pre-market & 9:15 surge.
+    from datetime import datetime
+    import pytz
+    _IST = pytz.timezone("Asia/Kolkata")
+    _now_t = datetime.now(_IST).time()
+    from datetime import time as _dtime
+    if strat_id != "custom_quant_momentum":
+        if _dtime(9, 30) <= _now_t < _dtime(9, 38):
+            final_score = round(max(10.0, final_score - 18.0), 1)  # Heavy penalty: first 8 minutes
+        elif _dtime(9, 38) <= _now_t < _dtime(9, 45):
+            final_score = round(max(10.0, final_score - 10.0), 1)  # Moderate penalty: 9:38-9:45
+
     return {
         "win_rate": final_score,
         "is_approved": final_score >= 60.0,
@@ -247,7 +309,7 @@ class AlgoEngine:
         # Engine State
         self.status = "STOPPED"       # "STOPPED" | "RUNNING" | "PAUSED"
         self.mode = TRADING_MODE.upper().strip() if TRADING_MODE else "PAPER"  # Controlled via .env
-        self.universe = "nifty50"     # "nifty50" | "fno" | "nifty100" | "watchlist"
+        self.universe = "all_stocks"     # "all_stocks" (All Market Stocks) | "fno" (F&O Only)
 
 
         # Scheduler & Timing
@@ -272,7 +334,7 @@ class AlgoEngine:
             "min_stock_price": 50.0,           # 💰 Minimum stock price (₹50) - Blocks penny stocks
             "max_stock_price": 3000.0,         # 💰 Maximum stock price (₹3,000) - Blocks illiquid high prices
             "min_market_cap_m": 100.0,         # 🏢 Minimum Market Cap > 100 Million (₹10 Cr+ / 100M+)
-            "entry_start_time": "09:20",       # 9:20 AM IST
+            "entry_start_time": "09:30",       # 9:30 AM IST (Opening 15-min candle form hone ke baad entry - opening volatility se bachav)
             "entry_cutoff_time": "14:45",      # 2:45 PM IST (No new entries)
             "auto_squareoff_time": "15:15",    # 3:15 PM IST (Auto exit all intraday)
             "circuit_breaker_hit": False,
@@ -289,32 +351,54 @@ class AlgoEngine:
                 "icon": "📈",
                 "enabled": True,
                 "timeframe": "5m",
-                "target_pct": 1.5,
-                "target_1_pct": 1.0,           # Target 1: Book 50% Qty & Move SL to Cost
-                "target_2_pct": 2.0,           # Target 2: Final 50% Runner
-                "sl_pct": 0.8,
-                "trailing_sl_pct": 0.3,
+                "start_time": "09:45",
+                "min_gain_pct": 0.5,
+                "max_gain_pct": 2.8,
+                "min_day_chg_pct": 0.8,
+                "max_day_chg_pct": 3.5,
+                "min_range_pos": 0.75,
+                "vwap_dist_mult": 1.002,
+                "min_turnover": 10000000.0,
+                "target_pct": 2.0,
+                "target_1_pct": 1.5,           # Target 1: Book 50% Qty & Move SL to Cost
+                "target_2_pct": 2.5,           # Target 2: Final 50% Runner
+                "sl_pct": 1.2,
+                "trailing_sl_pct": 0.6,
                 "capital_per_trade": 5000.0,
                 "product": "MIS",              # MIS uses 5X leverage
                 "side": "BOTH",               # BOTH, BUY_ONLY, SELL_ONLY
+                "fixed_qty": 0,               # 0 = Auto (capital based), >0 = Fixed qty per trade
                 "signals_count": 0,
             },
             "open_reversal": {
                 "id": "open_reversal",
-                "name": "Open Reversal Breakout",
-                "badge": "Dip & Surge",
-                "desc": "Stock dips below morning Open, rebounds strongly and crosses Open with volume.",
+                "name": "Morning Reversal + PDH Breakout",
+                "badge": "9:30-10:45 AM | PDH Break",
+                "desc": "Active 9:30-10:45 AM: Stock dips >= 0.5% below morning Open, recovers >= 0.6% back above Open, breaks Prev Day High (strict: 0.1% above PDH required). Gap protection: skips gap-up > 2% or gap-down > 2.5%. Auto exits immediately if price drops 1.5% from peak high.",
                 "icon": "🔄",
                 "enabled": True,
-                "timeframe": "3m",
-                "target_pct": 1.2,
-                "target_1_pct": 0.8,
-                "target_2_pct": 1.6,
-                "sl_pct": 0.7,
-                "trailing_sl_pct": 0.25,
+                "timeframe": "5m",
+                "start_time": "09:30",
+                "end_time": "10:45",
+                "min_dip_pct": 0.50,
+                "min_recovery_pct": 0.60,
+                "max_gap_up_pct": 2.0,
+                "max_gap_down_pct": 2.5,
+                "min_day_chg_pct": 0.3,
+                "min_range_pos": 0.60,
+                "pdh_breakout_mult": 1.001,
+                "vwap_dist_mult": 1.003,
+                "peak_drop_exit_pct": 1.5,
+                "min_turnover": 5000000.0,
+                "target_pct": 2.5,
+                "target_1_pct": 1.5,
+                "target_2_pct": 3.0,
+                "sl_pct": 1.2,
+                "trailing_sl_pct": 0.5,
                 "capital_per_trade": 5000.0,
                 "product": "MIS",
-                "side": "BOTH",
+                "side": "BUY_ONLY",
+                "fixed_qty": 0,
                 "signals_count": 0,
             },
             "rsi_reversion": {
@@ -325,86 +409,156 @@ class AlgoEngine:
                 "icon": "🎯",
                 "enabled": True,
                 "timeframe": "5m",
-                "target_pct": 1.0,
-                "target_1_pct": 0.7,
-                "target_2_pct": 1.4,
-                "sl_pct": 0.6,
-                "trailing_sl_pct": 0.2,
-                "capital_per_trade": 5000.0,
-                "product": "MIS",
-                "side": "BOTH",
-                "signals_count": 0,
-            },
-            "breakout_surge": {
-                "id": "breakout_surge",
-                "name": "Breakout & Volume Surge",
-                "badge": "High Break + 1.5x Vol",
-                "desc": "Day High / Previous Day High breakout accompanied by 1.5x+ volume spike.",
-                "icon": "🚀",
-                "enabled": True,
-                "timeframe": "5m",
-                "target_pct": 1.8,
-                "target_1_pct": 1.2,
-                "target_2_pct": 2.4,
-                "sl_pct": 0.9,
-                "trailing_sl_pct": 0.35,
-                "capital_per_trade": 5000.0,
-                "product": "MIS",
-                "side": "BUY_ONLY",
-                "signals_count": 0,
-            },
-            "supertrend_rider": {
-                "id": "supertrend_rider",
-                "name": "Supertrend Trend Rider",
-                "badge": "Supertrend (10, 3)",
-                "desc": "Captures sustained intraday directional trends when Supertrend changes color.",
-                "icon": "🛡️",
-                "enabled": True,
-                "timeframe": "5m",
-                "target_pct": 2.0,
-                "target_1_pct": 1.2,
-                "target_2_pct": 2.5,
+                "start_time": "09:50",
+                "min_drop_from_close": 1.0,
+                "max_drop_from_close": 3.0,
+                "min_bounce_from_low": 1.0,
+                "vwap_dist_mult": 0.998,
+                "min_turnover": 10000000.0,
+                "target_pct": 1.5,
+                "target_1_pct": 1.0,
+                "target_2_pct": 2.0,
                 "sl_pct": 1.0,
                 "trailing_sl_pct": 0.5,
                 "capital_per_trade": 5000.0,
                 "product": "MIS",
                 "side": "BOTH",
+                "fixed_qty": 0,
+                "signals_count": 0,
+            },
+            "breakout_surge": {
+                "id": "breakout_surge",
+                "name": "Breakout & Volume Surge",
+                "badge": "Day High + ₹2Cr Turn",
+                "desc": "Day High breakout with institutional Rupee Turnover >= ₹2Cr (Active 9:30-12:00 & 1:45-2:45).",
+                "icon": "🚀",
+                "enabled": True,
+                "timeframe": "5m",
+                "start_time": "09:30",
+                "morning_end_time": "12:00",
+                "afternoon_start_time": "13:45",
+                "end_time": "14:45",
+                "min_range_pos": 0.88,
+                "min_day_chg_pct": 0.8,
+                "min_day_gain_pct": 0.6,
+                "max_day_gain_pct": 4.0,
+                "min_turnover": 20000000.0,
+                "vwap_dist_mult": 1.002,
+                "target_pct": 2.2,
+                "target_1_pct": 1.5,
+                "target_2_pct": 3.0,
+                "sl_pct": 1.2,
+                "trailing_sl_pct": 0.6,
+                "capital_per_trade": 5000.0,
+                "product": "MIS",
+                "side": "BUY_ONLY",
+                "fixed_qty": 0,
+                "signals_count": 0,
+            },
+            "supertrend_rider": {
+                "id": "supertrend_rider",
+                "name": "Supertrend Trend Rider",
+                "badge": "Trend Pullback Retest",
+                "desc": "Captures high-probability trend retests into 20-EMA/VWAP shelf during sustained trends.",
+                "icon": "🛡️",
+                "enabled": True,
+                "timeframe": "5m",
+                "start_time": "09:45",
+                "min_day_chg_pct": 1.0,
+                "max_day_chg_pct": 3.8,
+                "min_range_pos": 0.65,
+                "max_range_pos": 0.85,
+                "vwap_dist_mult": 1.003,
+                "min_turnover": 15000000.0,
+                "target_pct": 2.5,
+                "target_1_pct": 1.5,
+                "target_2_pct": 3.0,
+                "sl_pct": 1.2,
+                "trailing_sl_pct": 0.6,
+                "capital_per_trade": 5000.0,
+                "product": "MIS",
+                "side": "BOTH",
+                "fixed_qty": 0,
                 "signals_count": 0,
             },
             "vwap_sniper": {
                 "id": "vwap_sniper",
                 "name": "VWAP Institutional Pullback",
-                "badge": "VWAP Value Dip",
-                "desc": "Buys high-probability pullbacks into the institutional VWAP demand zone with tight SL.",
+                "badge": "VWAP Bounce Confirm",
+                "desc": "Buys confirmed green bounces off the institutional VWAP shelf in strong uptrending stocks.",
                 "icon": "💎",
                 "enabled": True,
                 "timeframe": "5m",
-                "target_pct": 1.5,
-                "target_1_pct": 1.0,           # Target 1: Book 50% Qty & Move SL to Cost
-                "target_2_pct": 2.0,           # Target 2: Final 50% Runner
-                "sl_pct": 0.5,                 # Tight 0.5% SL below VWAP shelf
-                "trailing_sl_pct": 0.25,
+                "start_time": "09:45",
+                "min_day_chg_pct": 0.6,
+                "max_day_chg_pct": 3.8,
+                "min_vwap_dist_pct": 0.05,
+                "max_vwap_dist_pct": 0.55,
+                "min_bounce_pct": 0.35,
+                "min_turnover": 15000000.0,
+                "target_pct": 1.8,
+                "target_1_pct": 1.2,           # Target 1: Book 50% Qty & Move SL to Cost
+                "target_2_pct": 2.5,           # Target 2: Final 50% Runner
+                "sl_pct": 1.0,                 # 1.0% SL below VWAP shelf (protective against noise)
+                "trailing_sl_pct": 0.5,
                 "capital_per_trade": 5000.0,
                 "product": "MIS",              # MIS uses 5X leverage
                 "side": "BUY_ONLY",
+                "fixed_qty": 0,
                 "signals_count": 0,
             },
             "orb_breakout": {
                 "id": "orb_breakout",
                 "name": "ORB 15-Min Breakout",
-                "badge": "15m Range Break",
-                "desc": "Opening Range 15-minute high breakout with institutional volume and VWAP support.",
+                "badge": "9:15-9:30 Frozen Box",
+                "desc": "True 15-minute Opening Range (9:15-9:30 AM) high breakout, active strictly 9:30-11:15 AM.",
                 "icon": "⚡",
                 "enabled": True,
                 "timeframe": "15m",
-                "target_pct": 1.8,
-                "target_1_pct": 1.2,
-                "target_2_pct": 2.2,
-                "sl_pct": 0.7,
-                "trailing_sl_pct": 0.3,
+                "start_time": "09:30",
+                "end_time": "11:15",
+                "min_day_gain_pct": 0.6,
+                "max_day_gain_pct": 3.8,
+                "min_day_chg_pct": 0.8,
+                "orb_breakout_mult": 0.998,
+                "vwap_dist_mult": 1.002,
+                "min_turnover": 20000000.0,
+                "target_pct": 2.2,
+                "target_1_pct": 1.5,
+                "target_2_pct": 3.0,
+                "sl_pct": 1.2,
+                "trailing_sl_pct": 0.6,
                 "capital_per_trade": 5000.0,
                 "product": "MIS",
                 "side": "BUY_ONLY",
+                "fixed_qty": 0,
+                "signals_count": 0,
+            },
+            "custom_quant_momentum": {
+                "id": "custom_quant_momentum",
+                "name": "Pre-Market, Sector & OI Sniper",
+                "badge": "4-Filter | Sector + OI + 1.5% Peak SL",
+                "desc": "Active 9:15-14:45: Scans (1) Prev Day >4.5% movers, (2) 9:10 AM Pre-market gainers/losers, (3) 9:15 AM >=2% surge, (4) Bullish Sector stocks. Confirms Short Covering / OI Gainer before Buy. Instant 1.5% Peak Drop Stop Loss.",
+                "icon": "🎯",
+                "enabled": True,
+                "timeframe": "5m",
+                "start_time": "09:15",
+                "end_time": "14:45",
+                "prev_day_mover_pct": 4.5,
+                "pre_market_mover_pct": 1.5,
+                "open_surge_pct": 2.0,
+                "sector_bullish_min_pct": 0.5,
+                "peak_drop_exit_pct": 1.5,
+                "min_turnover": 5000000.0,
+                "target_pct": 2.5,
+                "target_1_pct": 1.5,
+                "target_2_pct": 3.0,
+                "sl_pct": 1.5,
+                "trailing_sl_pct": 0.5,
+                "capital_per_trade": 5000.0,
+                "product": "MIS",
+                "side": "BUY_ONLY",
+                "fixed_qty": 0,
                 "signals_count": 0,
             },
         }
@@ -441,6 +595,9 @@ class AlgoEngine:
         self.last_scan_duration_ms: float = 0.0
         self.is_websocket_active: bool = False
         self._ticker_callback_registered: bool = False
+        self._token_cache: Dict[str, int] = {}
+        self._orb_ranges: Dict[str, dict] = {}
+        self._bullish_sector_cache: Dict[str, tuple] = {}
 
         # Load persisted settings and trades if available
         self._load_state()
@@ -481,6 +638,7 @@ class AlgoEngine:
                 "strategies": self.strategies,
                 "closed_trades": self.closed_trades[-100:],  # keep last 100
                 "stats": self.stats,
+                "trade_date": datetime.now(IST).strftime("%Y-%m-%d"),  # Track trade date for cross-day reset
                 "saved_at": datetime.now(IST).isoformat(),
             }
             with open(STATE_FILE, "w", encoding="utf-8") as f:
@@ -514,11 +672,42 @@ class AlgoEngine:
                         if k in self.strategies:
                             self.strategies[k].update(v)
                 self.rebalance_strategy_capital()
-                self.closed_trades = data.get("closed_trades", [])
-                if "stats" in data:
-                    self.stats.update(data["stats"])
-                self.stats.setdefault("gross_pnl", 0.0)
-                self.stats.setdefault("total_charges", 0.0)
+
+                # ── DATE-AWARE RESTORE: Only load today's trades & stats ──────────
+                # Agar state file aaj ki nahi hai, toh closed_trades aur stats
+                # reset karo - cross-day data mismatch prevent karne ke liye.
+                saved_trade_date = data.get("trade_date", data.get("saved_at", "")[:10])
+                today_str = datetime.now(IST).strftime("%Y-%m-%d")
+                is_today = (saved_trade_date == today_str)
+
+                if is_today:
+                    # Aaj ka valid state: reload trades and stats
+                    self.closed_trades = data.get("closed_trades", [])
+                    if "stats" in data:
+                        self.stats.update(data["stats"])
+                    self.stats.setdefault("gross_pnl", 0.0)
+                    self.stats.setdefault("total_charges", 0.0)
+                    logger.info(f"✅ Loaded today's persisted algo state ({len(self.closed_trades)} closed trades).")
+                else:
+                    # Purani state (kal ya pehle ki): settings/strategies load karo,
+                    # lekin trades aur stats RESET karo - naya trading day start!
+                    self.closed_trades = []
+                    self.stats = {
+                        "today_pnl": 0.0,
+                        "realized_pnl": 0.0,
+                        "unrealized_pnl": 0.0,
+                        "gross_pnl": 0.0,
+                        "total_charges": 0.0,
+                        "total_trades": 0,
+                        "winning_trades": 0,
+                        "losing_trades": 0,
+                        "win_rate": 0.0,
+                        "profit_factor": 0.0,
+                        "signals_today": 0,
+                        "orders_today": 0,
+                    }
+                    logger.info(f"🔄 New trading day! Algo P&L stats & trade history reset (last saved: {saved_trade_date}).")
+                # ─────────────────────────────────────────────────────────────────
                 logger.info("Loaded persisted algo state successfully.")
         except Exception as e:
             logger.debug(f"Could not load algo state: {e}")
@@ -683,11 +872,12 @@ class AlgoEngine:
                     self._exit_position(pos, exit_price=pos.get("current_price", pos.get("entry_price")), reason="TIME_CUTOFF")
 
         # DAILY LOSS LIMIT CIRCUIT BREAKER
-        net_pnl = self.stats["realized_pnl"] + self.stats["unrealized_pnl"]
+        # Evaluate loss strictly on actual market trading loss, never triggered by brokerage charges
+        trading_gross_loss = self.stats.get("gross_pnl", 0.0) + self.stats.get("unrealized_gross", 0.0)
         max_loss = float(self.risk_config.get("max_daily_loss", 5000.0))
-        if net_pnl <= -abs(max_loss) and not self.risk_config.get("circuit_breaker_hit"):
+        if trading_gross_loss <= -abs(max_loss) and not self.risk_config.get("circuit_breaker_hit"):
             self.risk_config["circuit_breaker_hit"] = True
-            self.risk_config["circuit_breaker_reason"] = f"Max Daily Loss limit breached (-₹{abs(net_pnl):,.2f} / -₹{max_loss:,.2f})"
+            self.risk_config["circuit_breaker_reason"] = f"Max Daily Loss limit breached (-₹{abs(trading_gross_loss):,.2f} / -₹{max_loss:,.2f})"
             self.status = "STOPPED"
             self._log("ALERT", "🛑 CIRCUIT BREAKER TRIGGERED!", self.risk_config["circuit_breaker_reason"])
             # Auto square-off all open positions
@@ -734,7 +924,7 @@ class AlgoEngine:
             symbols = self._get_universe_symbols()
             if symbols:
                 try:
-                    sub_count = 250 if self.universe in ("all_stocks", "all_nse", "all") else 80
+                    sub_count = 250 if self.universe in ("all_stocks", "all_nse", "all") else 200
                     ticker.subscribe(symbols[:sub_count], exchange="NSE")
                     self.is_websocket_active = getattr(ticker, "is_connected", False)
                 except Exception as se:
@@ -828,26 +1018,49 @@ class AlgoEngine:
                 pos["lowest_price"] = ltp
 
         charges = charges_res["total_charges"]
-        net_pnl = gross_pnl - charges
         denom = entry_p * qty
-        net_pnl_pct = (net_pnl / denom) * 100.0 if denom > 0 else 0.0
+        gross_pnl_pct = (gross_pnl / denom) * 100.0 if denom > 0 else 0.0
 
+        # Charges are ONLY deducted when order is sold / settled, NOT before!
+        # Do not calculate or deduct brokerage charges into unrealized/active loss.
         pos["gross_pnl"] = round(gross_pnl, 2)
-        pos["charges"] = round(charges, 2)
+        pos["charges"] = 0.0  # Zero charges deducted before sell settlement
+        pos["est_charges"] = round(charges, 2)  # Kept as reference only
         pos["charges_breakdown"] = charges_res["breakdown"]
-        pos["pnl"] = round(net_pnl, 2)
-        pos["pnl_pct"] = round(net_pnl_pct, 2)
+        pos["pnl"] = round(gross_pnl, 2)
+        pos["pnl_pct"] = round(gross_pnl_pct, 2)
         pnl = pos["pnl"]
         pnl_pct = pos["pnl_pct"]
 
         # DYNAMIC TRAILING STOP LOSS & MULTI-TARGET EXITS
-        trail_pct = pos.get("trailing_step_pct", 0.3)
+        trail_pct = float(pos.get("trailing_step_pct", 0.5))
         t1 = pos.get("target_1", pos.get("target", 0))
         t2 = pos.get("target_2", t1 * (1.01 if side == "BUY" else 0.99))
+        trail_min_activation = max(1.0, trail_pct * 2.0)  # Require at least 1.0%+ gain before trailing starts!
 
         if side == "BUY":
+            # ── 🚨 SPECIAL PEAK DROP EXIT (Apne High se 1.5% down aane par Immediate Exit) ──
+            # User Rule: Agar kisi stock ko buy ho gaya hai aur wo apne peak high se 1.5% down aaye,
+            # to bina stop loss check kiye immediately 100% position exit karni hai.
+            highest_p = float(pos.get("highest_price", entry_p) or entry_p)
+            peak_drop_rule = float(pos.get("peak_drop_exit_pct", 0.0) or 0.0)
+            if peak_drop_rule <= 0 and pos.get("strategy_id") in ("open_reversal", "custom_quant_momentum"):
+                peak_drop_rule = 1.5
+
+            if peak_drop_rule > 0 and highest_p > 0:
+                drop_from_peak_pct = ((highest_p - ltp) / highest_p) * 100.0
+                if drop_from_peak_pct >= peak_drop_rule:
+                    self._log(
+                        "ORDER",
+                        f"⚡ [PEAK {peak_drop_rule:.1f}% DROP EXIT] Immediate Exit on {sym} @ ₹{ltp:.2f}",
+                        f"Stock dropped -{drop_from_peak_pct:.2f}% from its peak high (High: ₹{highest_p:.2f} → Current: ₹{ltp:.2f}). "
+                        f"P&L: ₹{pnl:,.2f} ({pnl_pct:.2f}%) | Exited immediately without waiting for Stop Loss!"
+                    )
+                    self._exit_position(pos, exit_price=ltp, reason="PEAK_DROP_1.5PCT")
+                    return True
+
             favorable_gain = ((ltp - entry_p) / entry_p) * 100.0
-            if favorable_gain >= trail_pct:
+            if favorable_gain >= trail_min_activation or pos.get("target_1_hit", False):
                 initial_sl_dist_pct = ((entry_p - pos["stop_loss"]) / entry_p) * 100.0
                 new_sl = round(pos["highest_price"] * (1.0 - (initial_sl_dist_pct / 100.0)), 2)
                 if new_sl > pos["trailing_sl"]:
@@ -889,7 +1102,7 @@ class AlgoEngine:
 
         else:  # SHORT POSITION
             favorable_gain = ((entry_p - ltp) / entry_p) * 100.0
-            if favorable_gain >= trail_pct:
+            if favorable_gain >= trail_min_activation or pos.get("target_1_hit", False):
                 initial_sl_dist_pct = ((pos["stop_loss"] - entry_p) / entry_p) * 100.0
                 new_sl = round(pos["lowest_price"] * (1.0 + (initial_sl_dist_pct / 100.0)), 2)
                 if new_sl < pos["trailing_sl"]:
@@ -968,9 +1181,58 @@ class AlgoEngine:
         quotes_data = {}
         scan_source = "REST"
 
-        if is_ws_ready:
+        now_time_check = datetime.now(IST).time()
+        is_reversal_active = (dtime(9, 30) <= now_time_check <= dtime(10, 45)) and bool(self.strategies.get("open_reversal", {}).get("enabled", True))
+
+        # 🚀 9:30 AM - 10:45 AM FULL MARKET SCAN: Scans all ~2,500 stocks across market via fast 500-symbol OHLC chunks
+        if is_reversal_active and self.universe in ("all_stocks", "all_nse", "all"):
+            kite = self._web_state.get("kite")
+            if not kite:
+                try:
+                    from web_app import _try_auto_login
+                    if _try_auto_login():
+                        kite = self._web_state.get("kite")
+                except Exception:
+                    pass
+
+            if kite:
+                all_market_syms = symbols[:2500]
+                batch_size = 500
+                ohlc_all = {}
+                for i in range(0, len(all_market_syms), batch_size):
+                    chunk = all_market_syms[i:i + batch_size]
+                    formatted = [f"NSE:{s}" if ":" not in s else s for s in chunk]
+                    try:
+                        data = kite.ohlc(formatted)
+                        if data:
+                            ohlc_all.update(data)
+                    except Exception as be:
+                        logger.debug(f"Reversal 2500 OHLC batch error: {be}")
+
+                if ohlc_all:
+                    for k, v in ohlc_all.items():
+                        s = k.replace("NSE:", "")
+                        ohlc_dict = v.get("ohlc", {}) or {}
+                        ltp_val = float(v.get("last_price", 0) or 0)
+                        open_val = float(ohlc_dict.get("open", 0) or 0)
+                        high_val = float(ohlc_dict.get("high", 0) or 0)
+                        low_val = float(ohlc_dict.get("low", 0) or 0)
+                        close_val = float(ohlc_dict.get("close", 0) or 0)
+                        quotes_data[s] = {
+                            "symbol": s,
+                            "ltp": ltp_val,
+                            "open": open_val,
+                            "high": high_val,
+                            "low": low_val,
+                            "close": close_val,
+                            "avg_price": round((open_val + high_val + low_val) / 3.0, 2),
+                            "volume": int(v.get("volume", 0) or 0),
+                        }
+                    scan_source = f"ALL_MARKET_OHLC ({len(quotes_data)} stocks)"
+
+        if not quotes_data and is_ws_ready:
             # ⚡ MILLISECOND WEBSOCKET IN-MEMORY SCAN (0ms network latency!)
-            scan_limit = 250 if self.universe in ("all_stocks", "all_nse", "all") else 80
+            scan_limit = 250 if self.universe in ("all_stocks", "all_nse", "all") else max(260, max_open)
             with self._quote_lock:
                 for s in symbols[:scan_limit]:
                     if s in self.live_quotes_cache:
@@ -996,13 +1258,13 @@ class AlgoEngine:
                     self._log("ALERT", "⚠️ Kite Connect not logged in", "Live market feed unavailable. Please login with Kite in dashboard to stream live market quotes.")
                 return 0
 
-            # Batch fetch OHLC for universe (up to 150 liquid symbols for all_stocks)
-            sample_count = 150 if self.universe in ("all_stocks", "all_nse", "all") else 40
+            # Batch fetch Quotes for universe (with real volume and average_price / VWAP)
+            sample_count = 250 if self.universe in ("all_stocks", "all_nse", "all") else min(260, len(symbols))
             sample_syms = symbols[:sample_count]
             formatted = [f"NSE:{s}" if ":" not in s else s for s in sample_syms]
             try:
-                raw_ohlc = kite.ohlc(formatted)
-                for k, v in raw_ohlc.items():
+                raw_quotes = kite.quote(formatted)
+                for k, v in raw_quotes.items():
                     s = k.replace("NSE:", "")
                     ohlc_dict = v.get("ohlc", {}) or {}
                     quotes_data[s] = {
@@ -1012,21 +1274,51 @@ class AlgoEngine:
                         "high": float(ohlc_dict.get("high", 0) or 0),
                         "low": float(ohlc_dict.get("low", 0) or 0),
                         "close": float(ohlc_dict.get("close", 0) or 0),
+                        "avg_price": float(v.get("average_price", 0) or 0),
+                        "volume": int(v.get("volume", 0) or 0),
                     }
-                scan_source = "REST_OHLC"
+                scan_source = "REST_QUOTE"
             except Exception as e:
                 logger.debug(f"REST scan batch error: {e}")
                 return 0
 
-        # Check entry cutoff time
+        # Check entry time window: no orders BEFORE entry_start (9:20 AM) or AFTER entry_cutoff (2:45 PM)
         now = datetime.now(IST).time()
         try:
+            start_parts = [int(p) for p in self.risk_config["entry_start_time"].split(":")]
             cutoff_parts = [int(p) for p in self.risk_config["entry_cutoff_time"].split(":")]
+            entry_start = dtime(start_parts[0], start_parts[1])
             entry_cutoff = dtime(cutoff_parts[0], cutoff_parts[1])
+            if now < entry_start:
+                return 0
             if now > entry_cutoff:
                 return 0
         except Exception:
-            pass
+            # Fallback: block before 9:20 AM
+            if now < dtime(9, 20):
+                return 0
+
+        # Record 9:15 - 9:30 AM Opening Range Box for ORB Strategy
+        today_date_str = str(datetime.now(IST).date())
+        if now <= dtime(9, 30):
+            for s, item in quotes_data.items():
+                cur_h = float(item.get("high", 0) or 0)
+                cur_l = float(item.get("low", 0) or 0)
+                if cur_h > 0 and cur_l > 0:
+                    entry = self._orb_ranges.get(s, {})
+                    if entry.get("date") != today_date_str:
+                        self._orb_ranges[s] = {"high": cur_h, "low": cur_l, "date": today_date_str}
+                    else:
+                        entry["high"] = max(entry["high"], cur_h)
+                        entry["low"] = min(entry["low"], cur_l)
+
+        # ── ☕ LUNCHTIME CHOP GATE (11:45 AM - 1:15 PM) ──
+        # Indian markets experience severe chop, low volume and false breakouts during lunch hour.
+        # Temporarily pause opening new breakout/momentum trades. Active positions remain 100% monitored.
+        is_lunch_chop = (dtime(11, 45) <= now <= dtime(13, 15)) and bool(self.risk_config.get("lunchtime_filter", True))
+
+        # Update sector momentum across universe for custom quant sector scanner
+        self._update_bullish_sectors(quotes_data)
 
         evaluated_count = len(quotes_data)
         active_symbols = {p["symbol"] for p in self.active_positions.values()}
@@ -1036,9 +1328,14 @@ class AlgoEngine:
         if used_margin >= total_cap:
             return 0
 
+        min_price = float(self.risk_config.get("min_stock_price", 50.0))
+        max_price = float(self.risk_config.get("max_stock_price", 3000.0))
+        min_mcap_m = float(self.risk_config.get("min_market_cap_m", 100.0))
+        min_required_wr = float(self.risk_config.get("min_win_rate_pct", 60.0))
+
+        candidates = []
+
         for sym, item in quotes_data.items():
-            if len(self.active_positions) >= max_open:
-                break
             if sym in active_symbols:
                 continue
 
@@ -1052,13 +1349,10 @@ class AlgoEngine:
 
             # Quality & RMS Filters:
             # 1. Price Range Gating: ₹50 <= LTP <= ₹3,000 (Exclude penny stocks & ultra-expensive stocks)
-            min_price = float(self.risk_config.get("min_stock_price", 50.0))
-            max_price = float(self.risk_config.get("max_stock_price", 3000.0))
             if open_p <= 0 or ltp < min_price or ltp > max_price:
                 continue
 
             # 2. Market Capitalization Gating: MCap >= 100 Million (Exclude micro-caps & illiquid counters)
-            min_mcap_m = float(self.risk_config.get("min_market_cap_m", 100.0))
             if not self._passes_market_cap_filter(sym, ltp, min_mcap_m):
                 continue
 
@@ -1067,9 +1361,12 @@ class AlgoEngine:
                 if not strat.get("enabled", True):
                     continue
 
+                # Lunchtime gate: skip breakout/momentum setups during lunch chop
+                if is_lunch_chop and strat_id in ("breakout_surge", "momentum_trend", "supertrend_rider", "orb_breakout"):
+                    continue
+
                 signal = self._evaluate_strategy(strat_id, sym, ltp, open_p, high_p, low_p, prev_close, avg_price, volume)
                 if signal:
-                    # Calculate Setup Win Rate Score %
                     t1_pct = float(strat.get("target_1_pct", strat.get("target_pct", 1.0)))
                     sl_pct = float(strat.get("sl_pct", 0.8))
                     side = signal.get("side", "BUY")
@@ -1085,26 +1382,46 @@ class AlgoEngine:
                         target_1_pct=t1_pct,
                         sl_pct=sl_pct,
                         avg_price=avg_price,
+                        volume=volume,
                     )
                     win_rate = wr_info["win_rate"]
                     signal["win_rate"] = win_rate
+                    signal["strat"] = strat
 
-                    min_required_wr = float(self.risk_config.get("min_win_rate_pct", 60.0))
+                    if win_rate >= min_required_wr:
+                        candidates.append(signal)
 
-                    # ⛔ STRICT GATING: Only execute when Win Rate % is >= min_required_wr (60%+)
-                    if win_rate < min_required_wr:
-                        self._log("RMS", f"⛔ [WIN RATE FILTER BLOCKED] {sym} ({signal['strategy_name']})",
-                                  f"Setup Win Rate is {win_rate:.1f}% (Required: {min_required_wr:.0f}%+). Order will NOT be executed!")
-                        continue
+        # ── 🏆 RANK CANDIDATES: HIGHEST QUALITY SCORE / WIN RATE FIRST ──
+        # This guarantees we only enter the BEST market leaders (e.g. top gainers with volume)
+        # rather than random stocks in alphabetical order!
+        if candidates:
+            # Deduplicate by symbol (keep the highest win-rate signal for each symbol)
+            unique_candidates = {}
+            for cand in candidates:
+                sym = cand["symbol"]
+                if sym not in unique_candidates or cand["win_rate"] > unique_candidates[sym]["win_rate"]:
+                    unique_candidates[sym] = cand
 
-                    # ✅ 60%+ Win Rate Verified!
-                    self._log("SIGNAL", f"🎯 [{signal['strategy_name']}] Signal Approved: {sym} @ ₹{ltp:.2f}",
-                              f"🔥 Setup Win Rate: {win_rate:.1f}% (>= {min_required_wr:.0f}% OK) | {signal.get('reason', '')}")
+            ranked_candidates = sorted(unique_candidates.values(), key=lambda s: s["win_rate"], reverse=True)
+            available_slots = max(0, max_open - len(self.active_positions))
+            executed_in_cycle = 0
 
-                    # ⚡ AUTO BUY / AUTO SELL EXECUTION!
-                    self._execute_auto_order(signal, strat)
-                    active_symbols.add(sym)
+            for top_signal in ranked_candidates:
+                if executed_in_cycle >= available_slots:
                     break
+                sym = top_signal["symbol"]
+                if sym in active_symbols:
+                    continue
+
+                self._log(
+                    "SIGNAL",
+                    f"🎯 [{top_signal['strategy_name']}] 🏆 Top-Ranked Signal Approved: {sym} @ ₹{top_signal['ltp']:.2f}",
+                    f"🔥 Setup Score: {top_signal['win_rate']:.1f}% (Ranked #{executed_in_cycle + 1}) | {top_signal.get('reason', '')}"
+                )
+
+                self._execute_auto_order(top_signal, top_signal["strat"])
+                active_symbols.add(sym)
+                executed_in_cycle += 1
 
         elapsed_ms = round((time.perf_counter() - t_start) * 1000.0, 2)
         self.last_scan_duration_ms = elapsed_ms
@@ -1130,119 +1447,438 @@ class AlgoEngine:
         Evaluates mathematical criteria for each strategy.
         Returns a signal dict if conditions are met, otherwise None.
         """
+        strat = self.strategies.get(strat_id, {})
+        now_t = datetime.now(IST).time()
         vwap = avg_price if avg_price > 0 else (open_p + high_p + low_p) / 3.0
         rng = high_p - low_p
+        turnover = (ltp * volume) if volume > 0 else 15000000.0
+
+        def _parse_time(t_str: str, default_h: int, default_m: int) -> dtime:
+            try:
+                parts = [int(p) for p in str(t_str).split(":")]
+                return dtime(parts[0], parts[1])
+            except Exception:
+                return dtime(default_h, default_m)
 
         # 1. MOMENTUM TREND (EMA + VWAP) - High-Conviction Institutional Trend
         if strat_id == "momentum_trend":
-            if ltp > open_p and prev_close > 0 and ltp > prev_close and ltp >= vwap:
+            st_time = _parse_time(strat.get("start_time", "09:45"), 9, 45)
+            if now_t < st_time:
+                return None
+            # Lunchtime Chop Gate: Avoid entries during 11:45 AM - 1:15 PM lull
+            if dtime(11, 45) <= now_t <= dtime(13, 15):
+                return None
+            vwap_mult = float(strat.get("vwap_dist_mult", 1.002))
+            min_gain = float(strat.get("min_gain_pct", 0.5))
+            max_gain = float(strat.get("max_gain_pct", 2.8))
+            min_day_chg = float(strat.get("min_day_chg_pct", 0.8))
+            max_day_chg = float(strat.get("max_day_chg_pct", 3.5))
+            min_rpos = float(strat.get("min_range_pos", 0.75))
+            min_turn = float(strat.get("min_turnover", 10000000.0))
+
+            if ltp > open_p and prev_close > 0 and ltp > prev_close and ltp >= (vwap * vwap_mult):
                 gain_pct = ((ltp - open_p) / open_p) * 100.0
                 day_chg = ((ltp - prev_close) / prev_close) * 100.0
                 range_pos = ((ltp - low_p) / rng) if rng > 0 else 1.0
-                if 0.5 <= gain_pct <= 3.8 and day_chg >= 0.5 and range_pos >= 0.65:
+                if min_gain <= gain_pct <= max_gain and min_day_chg <= day_chg <= max_day_chg and range_pos >= min_rpos and turnover >= min_turn:
                     return {
                         "strategy_id": strat_id,
-                        "strategy_name": "Momentum Trend",
+                        "strategy_name": strat.get("name", "Momentum Trend"),
                         "symbol": symbol,
                         "side": "BUY",
                         "ltp": ltp,
                         "reason": f"Bullish momentum (+{gain_pct:.1f}% vs Open, +{day_chg:.1f}% Day Change, above VWAP ₹{vwap:.2f})",
                     }
 
-        # 2. OPEN REVERSAL BREAKOUT - Morning Liquidity Sweep & Strong Rebound
+        # 2. MORNING REVERSAL + PREV DAY HIGH BREAKOUT (9:30 AM - 10:45 AM)
         elif strat_id == "open_reversal":
-            if low_p < open_p and ltp > open_p and ltp >= vwap:
+            st_time = _parse_time(strat.get("start_time", "09:30"), 9, 30)
+            end_time = _parse_time(strat.get("end_time", "10:45"), 10, 45)
+            if not (st_time <= now_t <= end_time):
+                return None
+
+            max_gap_up = float(strat.get("max_gap_up_pct", 2.0))
+            if prev_close > 0 and ((open_p - prev_close) / prev_close * 100.0) > max_gap_up:
+                return None
+
+            max_gap_down = float(strat.get("max_gap_down_pct", 2.5))
+            if prev_close > 0 and ((prev_close - open_p) / prev_close * 100.0) > max_gap_down:
+                return None
+
+            vwap_mult = float(strat.get("vwap_dist_mult", 1.003))
+            min_dip = float(strat.get("min_dip_pct", 0.50))
+            min_recov = float(strat.get("min_recovery_pct", 0.60))
+            min_day_chg = float(strat.get("min_day_chg_pct", 0.3))
+            min_rpos = float(strat.get("min_range_pos", 0.60))
+            pdh_mult = float(strat.get("pdh_breakout_mult", 1.001))
+            min_turn = float(strat.get("min_turnover", 5000000.0))
+            peak_drop = float(strat.get("peak_drop_exit_pct", 1.5))
+
+            if low_p < open_p and ltp > open_p and ltp >= (vwap * vwap_mult):
                 dip_pct = ((open_p - low_p) / open_p) * 100.0
                 recov_pct = ((ltp - open_p) / open_p) * 100.0
-                if 0.25 <= dip_pct <= 2.2 and 0.20 <= recov_pct <= 2.5:
-                    return {
-                        "strategy_id": strat_id,
-                        "strategy_name": "Open Reversal",
-                        "symbol": symbol,
-                        "side": "BUY",
-                        "ltp": ltp,
-                        "reason": f"Morning dip (-{dip_pct:.2f}%) swept & reversed strongly above Open (+{recov_pct:.2f}%, VWAP ₹{vwap:.2f})",
-                    }
+                day_chg = ((ltp - prev_close) / prev_close) * 100.0 if prev_close > 0 else 0.0
+                range_pos = ((ltp - low_p) / rng) if rng > 0 else 1.0
 
-        # 3. RSI MEAN REVERSION - High-Quality Oversold Bounce (No Falling Knives)
+                if dip_pct >= min_dip and recov_pct >= min_recov and day_chg >= min_day_chg and range_pos >= min_rpos:
+                    prev_high = 0.0
+                    try:
+                        kite = self._web_state.get("kite")
+                        token_map = self._token_cache
+                        if not token_map and kite:
+                            try:
+                                insts = kite.instruments("NSE")
+                                self._token_cache = {
+                                    i["tradingsymbol"]: i["instrument_token"]
+                                    for i in insts
+                                    if i.get("tradingsymbol") and i.get("instrument_token")
+                                }
+                                token_map = self._token_cache
+                            except Exception:
+                                pass
+                        try:
+                            from web_app import _get_symbol_prev_day
+                        except ImportError:
+                            from algo_trading.web_app import _get_symbol_prev_day
+
+                        prev_info = _get_symbol_prev_day(symbol, kite, token_map)
+                        prev_high = float(prev_info.get("high", 0.0) or 0.0)
+                    except Exception:
+                        pass
+
+                    benchmark_high = prev_high if prev_high > 0 else prev_close
+                    if benchmark_high > 0 and ltp >= (benchmark_high * pdh_mult) and turnover >= min_turn:
+                        pdh_label = f"PDH ₹{prev_high:.2f}" if prev_high > 0 else f"PDC ₹{prev_close:.2f}"
+                        return {
+                            "strategy_id": strat_id,
+                            "strategy_name": strat.get("name", "Morning Reversal + PDH Breakout"),
+                            "symbol": symbol,
+                            "side": "BUY",
+                            "ltp": ltp,
+                            "reason": f"Morning dip (-{dip_pct:.2f}%) swept & reversed above Open (+{recov_pct:.2f}%) and broke {pdh_label} firmly (VWAP ₹{vwap:.2f}, Day +{day_chg:.2f}%)",
+                            "peak_drop_exit_pct": peak_drop,
+                        }
+
+        # 3. RSI MEAN REVERSION - High-Quality Oversold Bounce
         elif strat_id == "rsi_reversion":
+            st_time = _parse_time(strat.get("start_time", "09:50"), 9, 50)
+            if now_t < st_time:
+                return None
+            min_drop = float(strat.get("min_drop_from_close", 1.0))
+            max_drop = float(strat.get("max_drop_from_close", 3.0))
+            min_bounce = float(strat.get("min_bounce_from_low", 1.0))
+            vwap_mult = float(strat.get("vwap_dist_mult", 0.998))
+            min_turn = float(strat.get("min_turnover", 10000000.0))
+
             if prev_close > 0 and low_p < prev_close:
                 drop_from_close = ((prev_close - low_p) / prev_close) * 100.0
                 bounce_from_low = ((ltp - low_p) / low_p) * 100.0 if low_p > 0 else 0.0
-                # Must not be crashing (> 2.8% drop), bounce must be confirmed >= 0.65%, holding near/above VWAP
-                if 1.0 <= drop_from_close <= 2.8 and bounce_from_low >= 0.65 and ltp >= (vwap * 0.997):
+                if min_drop <= drop_from_close <= max_drop and bounce_from_low >= min_bounce and ltp >= (vwap * vwap_mult) and turnover >= min_turn:
                     return {
                         "strategy_id": strat_id,
-                        "strategy_name": "RSI Reversion",
+                        "strategy_name": strat.get("name", "RSI Reversion"),
                         "symbol": symbol,
                         "side": "BUY",
                         "ltp": ltp,
-                        "reason": f"Confirmed oversold bounce (+{bounce_from_low:.2f}% off low, holding VWAP value zone)",
+                        "reason": f"Confirmed oversold bounce (+{bounce_from_low:.2f}% off low, holding VWAP ₹{vwap:.2f})",
                     }
 
-        # 4. BREAKOUT & VOLUME SURGE - Day High Expansion
+        # 4. BREAKOUT & VOLUME SURGE - Day High Expansion with Rupee Turnover
         elif strat_id == "breakout_surge":
-            if high_p > open_p and ltp > vwap:
-                if rng > 0 and (ltp - low_p) / rng >= 0.88 and ltp >= (high_p * 0.996):
-                    day_gain = ((ltp - open_p) / open_p) * 100.0
-                    if 0.7 <= day_gain <= 4.2:
-                        return {
-                            "strategy_id": strat_id,
-                            "strategy_name": "Breakout Surge",
-                            "symbol": symbol,
-                            "side": "BUY",
-                            "ltp": ltp,
-                            "reason": f"Day High Breakout (LTP near ₹{high_p:.2f} High, +{day_gain:.1f}%, VWAP confirmed)",
-                        }
+            m_start = _parse_time(strat.get("start_time", "09:30"), 9, 30)
+            m_end = _parse_time(strat.get("morning_end_time", "12:00"), 12, 0)
+            a_start = _parse_time(strat.get("afternoon_start_time", "13:45"), 13, 45)
+            a_end = _parse_time(strat.get("end_time", "14:45"), 14, 45)
 
-        # 5. SUPERTREND RIDER - Sustained Directional Uptrend
+            if not ((m_start <= now_t <= m_end) or (a_start <= now_t <= a_end)):
+                return None
+
+            vwap_mult = float(strat.get("vwap_dist_mult", 1.002))
+            min_rpos = float(strat.get("min_range_pos", 0.88))
+            min_day_chg = float(strat.get("min_day_chg_pct", 0.8))
+            min_gain = float(strat.get("min_day_gain_pct", 0.6))
+            max_gain = float(strat.get("max_day_gain_pct", 4.0))
+            min_turn = float(strat.get("min_turnover", 20000000.0))
+
+            if high_p > open_p and ltp >= (vwap * vwap_mult) and prev_close > 0:
+                day_gain = ((ltp - open_p) / open_p) * 100.0
+                day_chg = ((ltp - prev_close) / prev_close) * 100.0
+                range_pos = ((ltp - low_p) / rng) if rng > 0 else 1.0
+                if rng > 0 and range_pos >= min_rpos and ltp >= (high_p * 0.997) and day_chg >= min_day_chg and min_gain <= day_gain <= max_gain and turnover >= min_turn:
+                    return {
+                        "strategy_id": strat_id,
+                        "strategy_name": strat.get("name", "Breakout Surge"),
+                        "symbol": symbol,
+                        "side": "BUY",
+                        "ltp": ltp,
+                        "reason": f"Day High Breakout @ ₹{high_p:.2f} with ₹{turnover/10000000:.1f}Cr Turnover (+{day_chg:.1f}% Day Change, VWAP confirmed)",
+                    }
+
+        # 5. SUPERTREND RIDER - Trend-Following Pullback Retest
         elif strat_id == "supertrend_rider":
-            if prev_close > 0 and ltp > (prev_close * 1.006) and ltp > open_p and ltp > vwap:
+            st_time = _parse_time(strat.get("start_time", "09:45"), 9, 45)
+            if now_t < st_time:
+                return None
+            if dtime(11, 45) <= now_t <= dtime(13, 15):
+                return None
+            min_chg = float(strat.get("min_day_chg_pct", 1.0))
+            max_chg = float(strat.get("max_day_chg_pct", 3.8))
+            min_rpos = float(strat.get("min_range_pos", 0.65))
+            max_rpos = float(strat.get("max_range_pos", 0.85))
+            vwap_mult = float(strat.get("vwap_dist_mult", 1.003))
+            min_turn = float(strat.get("min_turnover", 15000000.0))
+
+            if prev_close > 0 and ltp > (prev_close * 1.008) and ltp > open_p and ltp > (vwap * vwap_mult):
                 chg = ((ltp - prev_close) / prev_close) * 100.0
                 range_pos = ((ltp - low_p) / rng) if rng > 0 else 1.0
-                if 0.8 <= chg <= 3.5 and range_pos >= 0.70:
+                if min_chg <= chg <= max_chg and min_rpos <= range_pos <= max_rpos and turnover >= min_turn:
                     return {
                         "strategy_id": strat_id,
-                        "strategy_name": "Supertrend Rider",
+                        "strategy_name": strat.get("name", "Supertrend Rider"),
                         "symbol": symbol,
                         "side": "BUY",
                         "ltp": ltp,
-                        "reason": f"Sustained directional uptrend (+{chg:.1f}% holding VWAP ₹{vwap:.2f})",
+                        "reason": f"Trend pullback retest (+{chg:.1f}% holding VWAP ₹{vwap:.2f}, range pos {range_pos*100:.0f}%)",
                     }
 
-        # 6. VWAP INSTITUTIONAL PULLBACK SNIPER (💎 80%+ Win Rate Setup)
+        # 6. VWAP INSTITUTIONAL PULLBACK SNIPER (💎 High Win-Rate Setup with Bounce Confirmation)
         elif strat_id == "vwap_sniper":
+            st_time = _parse_time(strat.get("start_time", "09:45"), 9, 45)
+            if now_t < st_time:
+                return None
+            min_day_chg = float(strat.get("min_day_chg_pct", 0.6))
+            max_day_chg = float(strat.get("max_day_chg_pct", 3.8))
+            min_vwap_d = float(strat.get("min_vwap_dist_pct", 0.05))
+            max_vwap_d = float(strat.get("max_vwap_dist_pct", 0.55))
+            min_bounce = float(strat.get("min_bounce_pct", 0.35))
+            min_turn = float(strat.get("min_turnover", 15000000.0))
+
             if vwap > 0 and prev_close > 0 and ltp > prev_close and ltp > open_p:
                 day_chg = ((ltp - prev_close) / prev_close) * 100.0
                 dist_from_vwap = ((ltp - vwap) / vwap) * 100.0
-                # In healthy green trend (+0.4% to +3.8%), retesting tight VWAP support (0.01% to 0.45%), holding well above day low
-                if 0.4 <= day_chg <= 3.8 and 0.01 <= dist_from_vwap <= 0.45 and (ltp >= low_p * 1.004):
+                bounce_from_low = ((ltp - low_p) / low_p) * 100.0 if low_p > 0 else 0.0
+                if min_day_chg <= day_chg <= max_day_chg and min_vwap_d <= dist_from_vwap <= max_vwap_d and bounce_from_low >= min_bounce and turnover >= min_turn:
                     return {
                         "strategy_id": strat_id,
-                        "strategy_name": "VWAP Institutional Pullback",
+                        "strategy_name": strat.get("name", "VWAP Institutional Pullback"),
                         "symbol": symbol,
                         "side": "BUY",
                         "ltp": ltp,
-                        "reason": f"Institutional VWAP Pullback (LTP ₹{ltp:.2f} testing VWAP ₹{vwap:.2f} with +{dist_from_vwap:.2f}% buffer, Day +{day_chg:.1f}%)",
+                        "reason": f"VWAP bounce confirmed (LTP ₹{ltp:.2f} bounced +{bounce_from_low:.2f}% off low, testing VWAP ₹{vwap:.2f} +{dist_from_vwap:.2f}%, Day +{day_chg:.1f}%)",
                     }
 
-        # 7. ORB 15-MIN INSTITUTIONAL BREAKOUT (⚡ Opening Range Expansion Breakout)
+        # 7. ORB 15-MIN INSTITUTIONAL BREAKOUT (Strictly 9:30 AM - 11:15 AM)
         elif strat_id == "orb_breakout":
-            if high_p > open_p and prev_close > 0 and ltp > prev_close and ltp > vwap:
-                if rng > 0 and (ltp - low_p) / rng >= 0.90 and ltp >= (high_p * 0.995):
-                    day_gain = ((ltp - open_p) / open_p) * 100.0
-                    day_chg = ((ltp - prev_close) / prev_close) * 100.0
-                    if 0.6 <= day_gain <= 4.0 and day_chg >= 0.4:
-                        return {
-                            "strategy_id": strat_id,
-                            "strategy_name": "ORB 15-Min Breakout",
-                            "symbol": symbol,
-                            "side": "BUY",
-                            "ltp": ltp,
-                            "reason": f"15-Min ORB High Breakout (LTP near ₹{high_p:.2f} High, +{day_gain:.1f}% vs Open, VWAP confirmed)",
-                        }
+            st_time = _parse_time(strat.get("start_time", "09:30"), 9, 30)
+            end_time = _parse_time(strat.get("end_time", "11:15"), 11, 15)
+            if not (st_time <= now_t <= end_time):
+                return None
+
+            orb_box = self._orb_ranges.get(symbol, {})
+            orb_high = float(orb_box.get("high", 0.0) or 0.0)
+            target_high = orb_high if orb_high > 0 else high_p
+
+            orb_mult = float(strat.get("orb_breakout_mult", 0.998))
+            vwap_mult = float(strat.get("vwap_dist_mult", 1.002))
+            min_day_gain = float(strat.get("min_day_gain_pct", 0.6))
+            max_day_gain = float(strat.get("max_day_gain_pct", 3.8))
+            min_day_chg = float(strat.get("min_day_chg_pct", 0.8))
+            min_turn = float(strat.get("min_turnover", 20000000.0))
+
+            if target_high > 0 and ltp >= (target_high * orb_mult) and ltp > open_p and ltp > (vwap * vwap_mult):
+                day_gain = ((ltp - open_p) / open_p) * 100.0
+                day_chg = ((ltp - prev_close) / prev_close) * 100.0 if prev_close > 0 else 0.0
+                if min_day_gain <= day_gain <= max_day_gain and day_chg >= min_day_chg and turnover >= min_turn:
+                    return {
+                        "strategy_id": strat_id,
+                        "strategy_name": strat.get("name", "ORB 15-Min Breakout"),
+                        "symbol": symbol,
+                        "side": "BUY",
+                        "ltp": ltp,
+                        "reason": f"15-Min ORB High Breakout (LTP ₹{ltp:.2f} broke ORB High ₹{target_high:.2f}, +{day_gain:.1f}% vs Open, VWAP confirmed)",
+                    }
+
+        # 8. PRE-MARKET, SECTOR & OI SNIPER (CUSTOM QUANTITATIVE LOGIC)
+        # 4-Filter Scan:
+        # 1) Prev Day > 4.5% mover (Up/Down)
+        # 2) Pre-Market 9:10 AM top gainer / loser
+        # 3) 9:15 AM opening surge >= 2.0%
+        # 4) Bullish / Teji sector stock
+        # Cross-Filter: Confirms Short Covering OR OI Gainer before triggering BUY
+        # Exit: Immediate Exit if price drops 1.5% from peak high
+        elif strat_id == "custom_quant_momentum":
+            st_time = _parse_time(strat.get("start_time", "09:15"), 9, 15)
+            end_time = _parse_time(strat.get("end_time", "14:45"), 14, 45)
+            if not (st_time <= now_t <= end_time):
+                return None
+
+            min_prev_move = float(strat.get("prev_day_mover_pct", 4.5))
+            min_pm_move = float(strat.get("pre_market_mover_pct", 1.5))
+            min_surge = float(strat.get("open_surge_pct", 2.0))
+            peak_drop = float(strat.get("peak_drop_exit_pct", 1.5))
+            min_turn = float(strat.get("min_turnover", 5000000.0))
+
+            matched_triggers = []
+
+            # Filter 1: Previous Day > 4.5% Mover (Up or Down)
+            is_prev_mover, prev_move_pct = self._check_prev_day_mover(symbol, prev_close, min_prev_move)
+            if is_prev_mover:
+                matched_triggers.append(f"Prev Day {prev_move_pct:+.1f}% Mover (>={min_prev_move}%)")
+
+            # Filter 2: Pre-Market 9:10 AM Gainer / Loser
+            if prev_close > 0 and open_p > 0:
+                pm_chg = ((open_p - prev_close) / prev_close) * 100.0
+                if abs(pm_chg) >= min_pm_move:
+                    matched_triggers.append(f"9:10 Pre-Market {pm_chg:+.1f}% Gainer/Loser")
+
+            # Filter 3: 9:15 AM Opening Surge >= 2.0%
+            day_chg = ((ltp - prev_close) / prev_close) * 100.0 if prev_close > 0 else 0.0
+            open_gain = ((ltp - open_p) / open_p) * 100.0 if open_p > 0 else 0.0
+            if day_chg >= min_surge or open_gain >= min_surge:
+                matched_triggers.append(f"9:15 Surge +{max(day_chg, open_gain):.1f}% (>=2.0%)")
+
+            # Filter 4: Bullish / Teji Sector Stock
+            is_bull_sec, sec_name, sec_perf = self._check_bullish_sector(symbol)
+            if is_bull_sec:
+                matched_triggers.append(f"Bullish Sector: {sec_name} (+{sec_perf:.1f}%)")
+
+            # If at least one of the 4 candidate list conditions is satisfied:
+            if matched_triggers and turnover >= min_turn:
+                # Check Short Covering OR OI Gainer confirmation
+                is_confirmed, oi_reason = self._check_short_covering_or_oi_gainer(
+                    symbol=symbol,
+                    ltp=ltp,
+                    open_p=open_p,
+                    high_p=high_p,
+                    low_p=low_p,
+                    prev_close=prev_close,
+                    vwap=vwap,
+                    volume=volume
+                )
+
+                if is_confirmed:
+                    triggers_text = " | ".join(matched_triggers)
+                    return {
+                        "strategy_id": strat_id,
+                        "strategy_name": strat.get("name", "Pre-Market, Sector & OI Sniper"),
+                        "symbol": symbol,
+                        "side": "BUY",
+                        "ltp": ltp,
+                        "reason": f"Custom Quant Confluence: [{triggers_text}] confirmed by {oi_reason}",
+                        "peak_drop_exit_pct": peak_drop,
+                    }
 
         return None
+
+    def _check_prev_day_mover(self, symbol: str, prev_close: float, min_move_pct: float = 4.5) -> tuple[bool, float]:
+        """Checks if the stock moved >= 4.5% up or down on previous trading session."""
+        try:
+            kite = self._web_state.get("kite")
+            token_map = self._token_cache
+            if not token_map and kite:
+                try:
+                    insts = kite.instruments("NSE")
+                    self._token_cache = {
+                        i["tradingsymbol"]: i["instrument_token"]
+                        for i in insts
+                        if i.get("tradingsymbol") and i.get("instrument_token")
+                    }
+                    token_map = self._token_cache
+                except Exception:
+                    pass
+
+            try:
+                from web_app import _get_symbol_prev_day
+            except ImportError:
+                from algo_trading.web_app import _get_symbol_prev_day
+
+            prev_info = _get_symbol_prev_day(symbol, kite, token_map)
+            if prev_info:
+                p_high = float(prev_info.get("high", 0) or 0)
+                p_low = float(prev_info.get("low", 0) or 0)
+                p_close = float(prev_info.get("close", 0) or 0)
+                p_open = float(prev_info.get("open", 0) or 0)
+                if p_open > 0 and p_close > 0:
+                    prev_chg = ((p_close - p_open) / p_open) * 100.0
+                    if abs(prev_chg) >= min_move_pct:
+                        return True, prev_chg
+                if p_low > 0 and p_high > 0:
+                    prev_range_chg = ((p_high - p_low) / p_low) * 100.0
+                    if prev_range_chg >= min_move_pct:
+                        return True, prev_range_chg
+        except Exception:
+            pass
+        return False, 0.0
+
+    def _update_bullish_sectors(self, quotes_data: dict, min_sector_chg: float = 0.5):
+        """Calculates live sector performance and updates bullish sector lookup."""
+        if not quotes_data:
+            return
+        bullish_symbols = {}
+        for sec_name, symbols in SECTOR_MAP.items():
+            sec_quotes = [quotes_data[s] for s in symbols if s in quotes_data]
+            if not sec_quotes:
+                continue
+            changes = []
+            for q in sec_quotes:
+                ltp = float(q.get("ltp", 0) or 0)
+                close_p = float(q.get("close", 0) or 0)
+                if close_p > 0 and ltp > 0:
+                    changes.append(((ltp - close_p) / close_p) * 100.0)
+            if changes:
+                avg_chg = sum(changes) / len(changes)
+                if avg_chg >= min_sector_chg:
+                    for s in symbols:
+                        bullish_symbols[s] = (sec_name, round(avg_chg, 2))
+        self._bullish_sector_cache = bullish_symbols
+
+    def _check_bullish_sector(self, symbol: str) -> tuple[bool, str, float]:
+        """Checks if a stock belongs to an outperforming / bullish sector."""
+        if hasattr(self, "_bullish_sector_cache") and symbol in self._bullish_sector_cache:
+            sec_name, avg_chg = self._bullish_sector_cache[symbol]
+            return True, sec_name, avg_chg
+        return False, "", 0.0
+
+    def _check_short_covering_or_oi_gainer(
+        self,
+        symbol: str,
+        ltp: float,
+        open_p: float,
+        high_p: float,
+        low_p: float,
+        prev_close: float,
+        vwap: float,
+        volume: int
+    ) -> tuple[bool, str]:
+        """
+        Verifies whether the stock exhibits Short Covering or OI Gainer characteristics:
+        1. Short Covering: Stock dipped or opened soft, then sharply squeezed back above VWAP & Open with strong buying momentum.
+        2. OI Gainer / Long Buildup: Stock holding near day high, trading solidly above VWAP with aggressive institutional turnover.
+        """
+        if ltp <= 0 or prev_close <= 0:
+            return False, ""
+
+        day_range = high_p - low_p
+        range_pos = ((ltp - low_p) / day_range) if day_range > 0 else 1.0
+        bounce_from_low = ((ltp - low_p) / low_p) * 100.0 if low_p > 0 else 0.0
+        day_chg = ((ltp - prev_close) / prev_close) * 100.0
+        turnover = (ltp * volume) if volume > 0 else 10000000.0
+
+        # Primary filter: Must be holding above VWAP support
+        if ltp < (vwap * 1.001):
+            return False, ""
+
+        # Check 1: Short Covering Pattern
+        # Price swept low earlier, now trading above VWAP and above Open with >= 0.8% sharp recovery bounce
+        if ltp > open_p and bounce_from_low >= 0.8 and day_chg >= 0.2:
+            return True, f"Short Covering Squeeze (+{bounce_from_low:.2f}% off Low, holding VWAP ₹{vwap:.2f})"
+
+        # Check 2: OI Gainer / Institutional Long Buildup Pattern
+        # Price holding upper 70% of day's range with positive day momentum and healthy turnover
+        if ltp > prev_close and range_pos >= 0.70 and day_chg >= 0.8 and turnover >= 5000000.0:
+            return True, f"OI Gainer / Long Buildup (Day +{day_chg:.1f}%, Range Pos {range_pos*100:.0f}%, above VWAP ₹{vwap:.2f})"
+
+        return False, ""
 
     # ─────────────────────────────────────────────────────────────
     # AUTO ORDER DISPATCHER (NO MANUAL CONFIRMATION)
@@ -1264,6 +1900,17 @@ class AlgoEngine:
         total_cap = float(self.risk_config.get("total_capital", TOTAL_CAPITAL or 2000000.0))
         max_pos = max(1, int(self.risk_config.get("max_open_positions", 4)))
         cap_mode = self.risk_config.get("capital_mode", "auto_split")
+
+        # ── HARD TIME GATE: No new orders before 9:20 AM ──
+        now_time = datetime.now(IST).time()
+        try:
+            start_parts = [int(p) for p in self.risk_config["entry_start_time"].split(":")]
+            entry_start = dtime(start_parts[0], start_parts[1])
+        except Exception:
+            entry_start = dtime(9, 20)
+        if now_time < entry_start:
+            self._log("RMS", f"⛔ [TIME GATE] Order Blocked for {symbol}", f"Current time {now_time.strftime('%H:%M')} is before entry start {entry_start.strftime('%H:%M')}. No orders before 9:20 AM!")
+            return
 
         # 0. Check Max Concurrent Positions
         if len(self.active_positions) >= max_pos:
@@ -1309,26 +1956,57 @@ class AlgoEngine:
         effective_cap = min(cap_alloc, available_cap)
         effective_buying_power = effective_cap * leverage_mult
 
-        quantity = int(effective_buying_power / ltp)
-        if quantity < 1:
-            if min_single_share_margin <= available_cap and min_single_share_margin <= cap_alloc * 1.5:
-                quantity = 1
-            else:
-                self._log("RMS", f"⛔ [INSUFFICIENT FUNDS] Cannot buy 1 Qty {symbol}: Required ₹{min_single_share_margin:,.2f} > Allocated ₹{cap_alloc:,.2f} (Available ₹{available_cap:,.2f})")
-                return
-
-        margin_req = (ltp * quantity) / leverage_mult
-
-        # Scale down quantity if margin exceeds available capital OR allocated logic capital
-        while quantity > 1 and (margin_req > available_cap + 1.0 or margin_req > cap_alloc + 1.0):
-            quantity -= 1
+        # ── FIXED QTY OVERRIDE: If strategy has fixed_qty > 0, use with risk clamp ──
+        fixed_qty = int(strat.get("fixed_qty", 0) or 0)
+        if fixed_qty > 0:
+            quantity = fixed_qty
             margin_req = (ltp * quantity) / leverage_mult
+            # Safety Clamp 1: Cannot exceed available capital margin
+            if margin_req > available_cap:
+                quantity = max(1, int(available_cap * leverage_mult / ltp))
+                margin_req = (ltp * quantity) / leverage_mult
+                self._log("ORDER", f"⚠️ [FIXED QTY CLAMPED] {symbol}: Clamped fixed qty from {fixed_qty} to {quantity} to fit available capital (Margin: ₹{margin_req:,.2f})")
+            # Safety Clamp 2: Max turnover per position (default cap ₹3,00,000 to prevent single-stock blowout)
+            max_pos_turnover = min(total_cap * 0.4, 300000.0)
+            if (ltp * quantity) > max_pos_turnover and total_cap < 50000000:
+                quantity = max(1, int(max_pos_turnover / ltp))
+                margin_req = (ltp * quantity) / leverage_mult
+                self._log("RMS", f"🛡️ [MAX EXPOSURE CLAMP] {symbol}: Capped quantity to {quantity} (Max Turnover: ₹{max_pos_turnover:,.2f}) to protect account!")
+            else:
+                self._log("ORDER", f"📦 [FIXED QTY] {symbol}: Using fixed qty={quantity} (Margin: ₹{margin_req:,.2f})")
+        else:
+            quantity = int(effective_buying_power / ltp)
+            if quantity < 1:
+                if min_single_share_margin <= available_cap and min_single_share_margin <= cap_alloc * 1.5:
+                    quantity = 1
+                else:
+                    self._log("RMS", f"⛔ [INSUFFICIENT FUNDS] Cannot buy 1 Qty {symbol}: Required ₹{min_single_share_margin:,.2f} > Allocated ₹{cap_alloc:,.2f} (Available ₹{available_cap:,.2f})")
+                    return
+
+            margin_req = (ltp * quantity) / leverage_mult
+
+            # Scale down quantity if margin exceeds available capital OR allocated logic capital
+            while quantity > 1 and (margin_req > available_cap + 1.0 or margin_req > cap_alloc + 1.0):
+                quantity -= 1
+                margin_req = (ltp * quantity) / leverage_mult
 
         # Target & SL Calculations (Multi-Target: T1 for 50% partial exit & T2 for runner)
         t1_pct = float(strat.get("target_1_pct", strat.get("target_pct", 1.0)))
         t2_pct = float(strat.get("target_2_pct", t1_pct * 2.0))
         sl_pct = float(strat.get("sl_pct", 0.8))
         trail_pct = float(strat.get("trailing_sl_pct", 0.3))
+
+        # Volatility-Adaptive Target & Stop Loss Tuning:
+        # High-value stocks (>= ₹1500) have tighter percentage swings: Clamp SL to max 1.0% to protect capital.
+        # Cheaper stocks (<= ₹300) have wider natural spreads: Ensure min 1.3% SL breathing room to prevent shakeouts.
+        if ltp >= 1500.0:
+            sl_pct = min(sl_pct, 1.0)
+            t1_pct = min(t1_pct, 1.4)
+            t2_pct = min(t2_pct, 2.2)
+        elif ltp <= 300.0:
+            sl_pct = max(sl_pct, 1.3)
+            t1_pct = max(t1_pct, 1.8)
+            t2_pct = max(t2_pct, 3.2)
 
         if side == "BUY":
             t1_price = round(ltp * (1.0 + (t1_pct / 100.0)), 2)
@@ -1420,6 +2098,7 @@ class AlgoEngine:
                 "target_1_hit": False,
                 "trailing_sl": sl_price,
                 "trailing_step_pct": trail_pct,
+                "peak_drop_exit_pct": float(signal.get("peak_drop_exit_pct", strat.get("peak_drop_exit_pct", 1.5 if strat_id in ("open_reversal", "custom_quant_momentum") else 0.0)) or 0.0),
                 "margin_used": round(margin_req, 2),
                 "win_rate": signal.get("win_rate", 60.0),
                 "gross_pnl": 0.0,
@@ -1463,10 +2142,20 @@ class AlgoEngine:
             exit_side = "BUY"
             charges_res = calculate_trade_charges(product, qty, buy_price=exit_price, sell_price=entry_p)
 
-        charges = charges_res["total_charges"]
-        net_pnl = round(gross_pnl - charges, 2)
         gross_pnl = round(gross_pnl, 2)
-        net_pnl_pct = round((net_pnl / (entry_p * qty)) * 100.0, 2) if (entry_p * qty) > 0 else 0.0
+        # Brokerage & taxes are deducted upon order sell / settlement
+        # "na hi brokerage charge ko loss se calculate kare" -> do not deduct/calculate brokerage charges on loss trades
+        if gross_pnl > 0:
+            charges = charges_res["total_charges"]
+            charges_breakdown = charges_res["breakdown"]
+            net_pnl = round(gross_pnl - charges, 2)
+        else:
+            charges = 0.0
+            charges_breakdown = {k: "₹0.00 (No charge on loss)" for k in charges_res["breakdown"]}
+            net_pnl = gross_pnl
+
+        denom = entry_p * qty
+        net_pnl_pct = round((net_pnl / denom) * 100.0, 2) if denom > 0 else 0.0
 
         pnl = net_pnl
         pnl_pct = net_pnl_pct
@@ -1506,6 +2195,7 @@ class AlgoEngine:
             "trade_id": f"TR_{symbol}_{int(time.time())}",
             "symbol": symbol,
             "strategy": pos.get("strategy_name", "Algo Strategy"),
+            "strategy_id": pos.get("strategy_id", ""),  # ✅ Fixed: strategy_id added for analytics filtering
             "side": side,
             "product": product,
             "quantity": qty,
@@ -1521,6 +2211,9 @@ class AlgoEngine:
             "exit_time": datetime.now(IST).strftime("%H:%M:%S"),
             "duration": f"{duration_min}m",
             "exit_reason": reason,
+            "timestamp": time.time(),            # ✅ Fixed: Unix timestamp for date filtering
+            "trade_date": datetime.now(IST).strftime("%Y-%m-%d"),  # ✅ Fixed: Date string for cross-day checks
+            "date": datetime.now(IST).strftime("%d %b %Y"),        # ✅ Fixed: Display date for UI
         }
         self.closed_trades.insert(0, trade_record)
 
@@ -1569,10 +2262,20 @@ class AlgoEngine:
             exit_side = "BUY"
             charges_res = calculate_trade_charges(product, exit_qty, buy_price=exit_price, sell_price=entry_p)
 
-        charges = charges_res["total_charges"]
-        net_pnl = round(gross_pnl - charges, 2)
         gross_pnl = round(gross_pnl, 2)
-        net_pnl_pct = round((net_pnl / (entry_p * exit_qty)) * 100.0, 2) if (entry_p * exit_qty) > 0 else 0.0
+        # Brokerage & taxes are deducted upon order sell / settlement
+        # "na hi brokerage charge ko loss se calculate kare" -> do not deduct/calculate brokerage charges on loss trades
+        if gross_pnl > 0:
+            charges = charges_res["total_charges"]
+            charges_breakdown = charges_res["breakdown"]
+            net_pnl = round(gross_pnl - charges, 2)
+        else:
+            charges = 0.0
+            charges_breakdown = {k: "₹0.00 (No charge on loss)" for k in charges_res["breakdown"]}
+            net_pnl = gross_pnl
+
+        denom = entry_p * exit_qty
+        net_pnl_pct = round((net_pnl / denom) * 100.0, 2) if denom > 0 else 0.0
 
         pnl = net_pnl
         pnl_pct = net_pnl_pct
@@ -1619,6 +2322,7 @@ class AlgoEngine:
             "trade_id": f"TR_PART_{symbol}_{int(time.time())}",
             "symbol": symbol,
             "strategy": pos.get("strategy_name", "Algo Strategy"),
+            "strategy_id": pos.get("strategy_id", ""),  # ✅ Fixed: strategy_id for analytics filtering
             "side": side,
             "product": product,
             "quantity": exit_qty,
@@ -1634,6 +2338,9 @@ class AlgoEngine:
             "exit_time": datetime.now(IST).strftime("%H:%M:%S"),
             "duration": f"{duration_min}m",
             "exit_reason": reason,
+            "timestamp": time.time(),            # ✅ Fixed: Unix timestamp for date filtering
+            "trade_date": datetime.now(IST).strftime("%Y-%m-%d"),  # ✅ Fixed: Date string for cross-day checks
+            "date": datetime.now(IST).strftime("%d %b %Y"),        # ✅ Fixed: Display date for UI
         }
         self.closed_trades.insert(0, trade_record)
 
@@ -1674,13 +2381,16 @@ class AlgoEngine:
         """Recomputes unrealized and net P&L across all active positions."""
         unrealized = sum(p.get("pnl", 0.0) for p in self.active_positions.values())
         unrealized_gross = sum(p.get("gross_pnl", 0.0) for p in self.active_positions.values())
-        unrealized_charges = sum(p.get("charges", 0.0) for p in self.active_positions.values())
+        # Sum estimated round-trip brokerage & taxes for open positions + realized charges
+        unrealized_charges = sum(p.get("est_charges", p.get("charges", 0.0)) for p in self.active_positions.values())
 
         self.stats["unrealized_pnl"] = round(unrealized, 2)
         self.stats["unrealized_gross"] = round(unrealized_gross, 2)
         self.stats["unrealized_charges"] = round(unrealized_charges, 2)
+        # Today's Net P&L: Realized net P&L (charges deducted upon sell settlement) + Unrealized Gross P&L (charges NOT deducted before sell settlement)
         self.stats["today_pnl"] = round(self.stats.get("realized_pnl", 0.0) + unrealized, 2)
         self.stats["today_gross_pnl"] = round(self.stats.get("gross_pnl", 0.0) + unrealized_gross, 2)
+        # Brokerage & taxes KPI displays the total sum of charges (settled trades + estimated open position charges)
         self.stats["today_charges"] = round(self.stats.get("total_charges", 0.0) + unrealized_charges, 2)
 
     def _passes_market_cap_filter(self, symbol: str, ltp: float, min_mcap_m: float = 100.0) -> bool:
@@ -1718,7 +2428,11 @@ class AlgoEngine:
         return True
 
     def _get_universe_symbols(self) -> List[str]:
-        """Resolves symbol list based on selected universe."""
+        """
+        Resolves symbol list based on selected universe:
+        1. 'fno': All active liquid F&O stocks (~260 derivative counters)
+        2. 'all_stocks' (default): Complete market universe (All NSE EQ, excluding penny stocks <₹50 via RMS)
+        """
         if self.universe == "fno":
             try:
                 from web_app import _get_fno_symbols
@@ -1726,33 +2440,14 @@ class AlgoEngine:
                 from algo_trading.web_app import _get_fno_symbols
             kite = self._web_state.get("kite")
             fno = list(_get_fno_symbols(kite))
-            return fno if fno else ["RELIANCE", "TCS", "INFY", "HDFCBANK", "ICICIBANK", "SBIN", "TATAMOTORS"]
-        elif self.universe in ("all_stocks", "all_nse", "all"):
+            return fno if fno else ["RELIANCE", "TCS", "INFY", "HDFCBANK", "ICICIBANK", "SBIN", "TMCV"]
+        else:  # "all_stocks" - All available market stocks (excl penny stocks)
             try:
                 from web_app import _resolve_symbols
             except ImportError:
                 from algo_trading.web_app import _resolve_symbols
             syms = _resolve_symbols("all_stocks")
-            return syms if syms else ["RELIANCE", "TCS", "INFY", "HDFCBANK", "ICICIBANK", "SBIN", "TATAMOTORS"]
-        elif self.universe == "nifty100":
-            try:
-                from web_app import _resolve_symbols
-            except ImportError:
-                from algo_trading.web_app import _resolve_symbols
-            return _resolve_symbols("nifty100")
-        elif self.universe == "watchlist":
-            try:
-                from config import INTRADAY_CONFIG
-            except ImportError:
-                from algo_trading.config import INTRADAY_CONFIG
-            return INTRADAY_CONFIG.get("watchlist", ["RELIANCE", "TCS", "INFY", "HDFCBANK"])
-        else:  # default nifty50
-            try:
-                from web_app import _resolve_symbols
-            except ImportError:
-                from algo_trading.web_app import _resolve_symbols
-            syms = _resolve_symbols("nifty50")
-            return syms if syms else ["RELIANCE", "TCS", "INFY", "HDFCBANK", "ICICIBANK", "SBIN", "BAJFINANCE", "TATAMOTORS", "AXISBANK", "TATASTEEL"]
+            return syms if syms else ["RELIANCE", "TCS", "INFY", "HDFCBANK", "ICICIBANK", "SBIN", "TMCV"]
 
     # ─────────────────────────────────────────────────────────────
     # API SERIALIZERS
@@ -2051,11 +2746,22 @@ class AlgoEngine:
             for t in self.closed_trades:
                 trade_strat_id = t.get("strategy_id", "")
                 trade_strat_name = t.get("strategy", "")
-                if trade_strat_id == strat_id or trade_strat_name == strat_name or strat_id in trade_strat_id:
-                    t_time = t.get("timestamp") or t.get("entry_timestamp") or now_ts
-                    if (now_ts - t_time) <= filter_sec:
+                if trade_strat_id == strat_id or trade_strat_name == strat_name or (trade_strat_id and strat_id in trade_strat_id):
+                    # ✅ Fixed: Use timestamp field for filtering; fallback to trade_date comparison
+                    t_time = t.get("timestamp")
+                    if t_time is None:
+                        # Purani trades jisme timestamp nahi hai: trade_date se check karo
+                        t_date = t.get("trade_date", "")
+                        if t_date:
+                            try:
+                                t_time = datetime.strptime(t_date, "%Y-%m-%d").timestamp()
+                            except Exception:
+                                t_time = now_ts  # Fallback: include in results
+                        else:
+                            t_time = now_ts  # Unknown date: include by default
+                    if (now_ts - float(t_time)) <= filter_sec:
                         matched_trades.append({
-                            "date": t.get("date", datetime.fromtimestamp(t_time).strftime("%d %b %Y")),
+                            "date": t.get("date", datetime.fromtimestamp(float(t_time)).strftime("%d %b %Y")),
                             "time": t.get("exit_time") or t.get("entry_time") or "10:00:00",
                             "symbol": t.get("symbol", ""),
                             "side": t.get("side", "BUY"),
@@ -2089,68 +2795,8 @@ class AlgoEngine:
                         "is_live": True,
                     })
 
-            # 3. If live history has fewer than 2 trades for this day filter,
-            # provide calibrated strategy performance telemetry
+            # 3. Strictly use REAL trades only (no fake DEMO simulated trades)
             is_benchmark = False
-            if len(matched_trades) < 2:
-                is_benchmark = True
-                benchmarks = {
-                    "momentum_trend": {"win_rate": 72.5, "target": 1.4, "sl": 0.7, "trades_per_day": 3, "symbols": ["RELIANCE", "ICICIBANK", "TCS", "SBIN", "BHARTIARTL", "LT", "HDFCBANK", "INFY"]},
-                    "breakout_surge": {"win_rate": 75.0, "target": 1.6, "sl": 0.8, "trades_per_day": 2, "symbols": ["CIPLA", "TATASTEEL", "BAJFINANCE", "HINDALCO", "JSWSTEEL", "ADANIENT"]},
-                    "vwap_sniper": {"win_rate": 80.0, "target": 1.3, "sl": 0.5, "trades_per_day": 2, "symbols": ["HDFCBANK", "KOTAKBANK", "AXISBANK", "INDUSINDBK", "TITAN", "MARUTI"]},
-                    "orb_breakout": {"win_rate": 73.5, "target": 1.5, "sl": 0.7, "trades_per_day": 2, "symbols": ["TATAMOTORS", "SUNPHARMA", "DRREDDY", "WIPRO", "COALINDIA", "NTPC"]},
-                    "supertrend_rider": {"win_rate": 70.0, "target": 1.8, "sl": 0.9, "trades_per_day": 2, "symbols": ["M&M", "HEROMOTOCO", "BAJAJ-AUTO", "EICHERMOT", "POWERGRID"]},
-                    "open_reversal": {"win_rate": 68.0, "target": 1.2, "sl": 0.6, "trades_per_day": 3, "symbols": ["ITC", "HCLTECH", "TECHM", "GRASIM", "ULTRACEMCO", "APOLLOHOSP"]},
-                    "rsi_reversion": {"win_rate": 66.5, "target": 1.1, "sl": 0.6, "trades_per_day": 2, "symbols": ["ASIANPAINT", "DIVISLAB", "BRITANNIA", "NESTLEIND", "TATACONSUM"]},
-                }
-                b = benchmarks.get(strat_id, {"win_rate": 70.0, "target": 1.4, "sl": 0.7, "trades_per_day": 2, "symbols": ["RELIANCE", "SBIN", "INFY", "TCS"]})
-                
-                sim_trades_count = max(2, min(24, int(b["trades_per_day"] * min(days_num, 6))))
-                base_syms = b["symbols"]
-                
-                for i in range(sim_trades_count):
-                    day_offset = (i // b["trades_per_day"])
-                    trade_date = (datetime.now(IST) - timedelta(days=day_offset)).strftime("%d %b %Y")
-                    sym = base_syms[i % len(base_syms)]
-                    
-                    seed_str = f"{strat_id}_{day_offset}_{i}_{sym}"
-                    h = int(hashlib.md5(seed_str.encode()).hexdigest(), 16) % 100
-                    is_win = (h < b["win_rate"])
-                    
-                    entry_p = round(350.0 + (h * 18.5), 2)
-                    qty = max(5, int(cap_per_trade / (entry_p / 5.0)))
-                    
-                    if is_win:
-                        ret_pct = round(b["target"] + ((h % 20) / 50.0), 2)
-                        pnl = round((entry_p * qty * (ret_pct / 100.0)) - 35.0, 2)
-                        exit_p = round(entry_p * (1.0 + ret_pct / 100.0), 2)
-                        reason = "Target 1 Hit (+1.0%, 50% Qty) & T2 Reached"
-                        status = "WIN"
-                    else:
-                        ret_pct = round(-b["sl"] - ((h % 10) / 50.0), 2)
-                        pnl = round((entry_p * qty * (ret_pct / 100.0)) - 35.0, 2)
-                        exit_p = round(entry_p * (1.0 + ret_pct / 100.0), 2)
-                        reason = "Stop Loss Hit (-0.8%)"
-                        status = "LOSS"
-                    
-                    hr = 9 + (i % 5)
-                    mn = 15 + ((i * 17) % 40)
-                    t_str = f"{hr:02d}:{mn:02d}:00"
-                    
-                    matched_trades.append({
-                        "date": trade_date,
-                        "time": t_str,
-                        "symbol": sym,
-                        "side": "BUY",
-                        "entry_price": entry_p,
-                        "exit_price": exit_p,
-                        "quantity": qty,
-                        "return_pct": ret_pct,
-                        "pnl": pnl,
-                        "status": status,
-                        "exit_reason": reason,
-                        "is_live": False,
-                    })
 
             # Calculate Aggregate Performance Metrics
             total_trades = len(matched_trades)
@@ -2178,23 +2824,15 @@ class AlgoEngine:
             max_win_pnl = round(max((t.get("pnl", 0.0) for t in winning_trades), default=0.0), 2)
             max_loss_pnl = round(min((t.get("pnl", 0.0) for t in losing_trades), default=0.0), 2)
 
+            strat_dict = dict(strat)
+            strat_dict["capital_per_trade"] = cap_per_trade
+
             return {
                 "success": True,
-                "strategy": {
-                    "id": strat_id,
-                    "name": strat_name,
-                    "badge": strat_badge,
-                    "icon": strat_icon,
-                    "desc": strat_desc,
-                    "timeframe": strat.get("timeframe", "5m"),
-                    "target_1_pct": strat.get("target_1_pct", 1.0),
-                    "target_2_pct": strat.get("target_2_pct", 2.0),
-                    "sl_pct": strat.get("sl_pct", 0.8),
-                    "capital_per_trade": cap_per_trade,
-                },
+                "strategy": strat_dict,
                 "filter_days": days_num,
                 "filter_label": days_label,
-                "data_source": "Live Execution Telemetry" if not is_benchmark else "Backtested Model Benchmark (Calibrated)",
+                "data_source": "Live Strategy Execution Telemetry",
                 "summary": {
                     "total_trades": total_trades,
                     "completed_trades": comp_count,
@@ -2287,3 +2925,159 @@ class AlgoEngine:
                     "unrealized": round(self.stats["unrealized_pnl"], 2),
                 }]
             return list(self.equity_curve)
+
+    def get_custom_strategy_scan_candidates(self) -> dict:
+        """
+        Scans live market universe for the 4 Custom Quant Criteria:
+        1. Prev Day >4.5% Mover (Up or Down)
+        2. 9:10 AM Pre-Market Gainer/Loser (>=1.5%)
+        3. 9:15 AM Opening Surge (>=2.0%)
+        4. Bullish / Teji Sector stocks
+        Evaluates Short Covering / OI confirmation status, Win Rate, and Stop Loss details.
+        """
+        symbols = self._get_universe_symbols()
+        if not symbols:
+            return {"success": True, "stocks": [], "total": 0, "bullish_sectors": []}
+
+        # Gather quotes (from websocket cache or REST fallback)
+        quotes_data = {}
+        with self._quote_lock:
+            for s in symbols[:350]:
+                if s in self.live_quotes_cache:
+                    quotes_data[s] = self.live_quotes_cache[s]
+
+        if not quotes_data:
+            kite = self._web_state.get("kite")
+            if kite:
+                sample_syms = symbols[:250]
+                formatted = [f"NSE:{s}" if ":" not in s else s for s in sample_syms]
+                try:
+                    raw_quotes = kite.quote(formatted)
+                    for k, v in raw_quotes.items():
+                        s = k.replace("NSE:", "")
+                        ohlc_dict = v.get("ohlc", {}) or {}
+                        quotes_data[s] = {
+                            "symbol": s,
+                            "ltp": float(v.get("last_price", 0) or 0),
+                            "open": float(ohlc_dict.get("open", 0) or 0),
+                            "high": float(ohlc_dict.get("high", 0) or 0),
+                            "low": float(ohlc_dict.get("low", 0) or 0),
+                            "close": float(ohlc_dict.get("close", 0) or 0),
+                            "avg_price": float(v.get("average_price", 0) or 0),
+                            "volume": int(v.get("volume", 0) or 0),
+                        }
+                except Exception as e:
+                    logger.debug(f"Scanner candidate fetch error: {e}")
+
+        # Update sector performance
+        self._update_bullish_sectors(quotes_data)
+        bullish_sec_list = []
+        for sec_name, syms in SECTOR_MAP.items():
+            sec_quotes = [quotes_data[s] for s in syms if s in quotes_data]
+            if sec_quotes:
+                changes = [((float(q.get("ltp", 0)) - float(q.get("close", 0))) / float(q.get("close", 1))) * 100.0 for q in sec_quotes if float(q.get("close", 0)) > 0]
+                if changes:
+                    avg_c = sum(changes) / len(changes)
+                    if avg_c >= 0.5:
+                        bullish_sec_list.append({"name": sec_name, "change_pct": round(avg_c, 2), "stocks_count": len(syms)})
+
+        matched_stocks = []
+        active_symbols = {p["symbol"] for p in self.active_positions.values()}
+
+        strat = self.strategies.get("custom_quant_momentum", {})
+        min_prev_move = float(strat.get("prev_day_mover_pct", 4.5))
+        min_pm_move = float(strat.get("pre_market_mover_pct", 1.5))
+        min_surge = float(strat.get("open_surge_pct", 2.0))
+
+        for sym, item in quotes_data.items():
+            ltp = float(item.get("ltp", 0) or 0)
+            open_p = float(item.get("open", 0) or 0)
+            high_p = float(item.get("high", 0) or 0)
+            low_p = float(item.get("low", 0) or 0)
+            prev_close = float(item.get("close", 0) or 0)
+            avg_price = float(item.get("avg_price", 0) or 0)
+            volume = int(item.get("volume", 0) or 0)
+            vwap = avg_price if avg_price > 0 else (open_p + high_p + low_p) / 3.0
+
+            if ltp <= 0 or prev_close <= 0:
+                continue
+
+            day_chg = ((ltp - prev_close) / prev_close) * 100.0
+            open_gain = ((ltp - open_p) / open_p) * 100.0 if open_p > 0 else 0.0
+
+            triggers = []
+
+            # 1. Previous Day Move >= 4.5%
+            is_prev_m, prev_move_pct = self._check_prev_day_mover(sym, prev_close, min_prev_move)
+            if is_prev_m:
+                triggers.append({"code": "PREV_DAY", "label": f"Prev Day {prev_move_pct:+.1f}%", "value": round(prev_move_pct, 2)})
+
+            # 2. Pre-market 9:10 AM move >= 1.5%
+            if open_p > 0:
+                pm_chg = ((open_p - prev_close) / prev_close) * 100.0
+                if abs(pm_chg) >= min_pm_move:
+                    triggers.append({"code": "PRE_MARKET", "label": f"9:10 Gap {pm_chg:+.1f}%", "value": round(pm_chg, 2)})
+
+            # 3. 9:15 AM Opening Surge >= 2.0%
+            if day_chg >= min_surge or open_gain >= min_surge:
+                triggers.append({"code": "OPEN_SURGE", "label": f"9:15 Surge +{max(day_chg, open_gain):.1f}%", "value": round(max(day_chg, open_gain), 2)})
+
+            # 4. Bullish Sector
+            is_bull_sec, sec_name, sec_perf = self._check_bullish_sector(sym)
+            if is_bull_sec:
+                triggers.append({"code": "BULLISH_SECTOR", "label": f"Sector: {sec_name} (+{sec_perf:.1f}%)", "value": round(sec_perf, 2), "sector": sec_name})
+
+            if triggers:
+                # Check Short Covering / OI Gainer confirmation
+                is_oi_confirmed, oi_desc = self._check_short_covering_or_oi_gainer(
+                    sym, ltp, open_p, high_p, low_p, prev_close, vwap, volume
+                )
+
+                # Setup score / win rate
+                wr_info = calculate_setup_win_rate(
+                    strat_id="custom_quant_momentum",
+                    side="BUY",
+                    ltp=ltp,
+                    open_p=open_p,
+                    high_p=high_p,
+                    low_p=low_p,
+                    prev_close=prev_close,
+                    target_1_pct=1.5,
+                    sl_pct=1.5,
+                    avg_price=avg_price,
+                    volume=volume,
+                )
+
+                matched_stocks.append({
+                    "symbol": sym,
+                    "ltp": round(ltp, 2),
+                    "open": round(open_p, 2),
+                    "high": round(high_p, 2),
+                    "low": round(low_p, 2),
+                    "prev_close": round(prev_close, 2),
+                    "vwap": round(vwap, 2),
+                    "day_chg_pct": round(day_chg, 2),
+                    "triggers": triggers,
+                    "triggers_count": len(triggers),
+                    "is_oi_confirmed": is_oi_confirmed,
+                    "oi_confirmation_desc": oi_desc if is_oi_confirmed else "Awaiting VWAP / Short Squeeze Confirmation",
+                    "status": "BUY_SIGNAL" if is_oi_confirmed else "QUALIFIED_CANDIDATE",
+                    "win_rate": wr_info["win_rate"],
+                    "in_position": (sym in active_symbols),
+                    "stop_loss": round(ltp * 0.985, 2),
+                    "peak_drop_sl_rule": "1.5% from Peak High",
+                    "target_1": round(ltp * 1.015, 2),
+                    "target_2": round(ltp * 1.030, 2),
+                })
+
+        # Sort: BUY Approved first, then by Win Rate / Triggers Count
+        matched_stocks.sort(key=lambda x: (1 if x["status"] == "BUY_SIGNAL" else 0, x["win_rate"], x["triggers_count"]), reverse=True)
+
+        return {
+            "success": True,
+            "stocks": matched_stocks,
+            "total": len(matched_stocks),
+            "buy_ready_count": len([s for s in matched_stocks if s["status"] == "BUY_SIGNAL"]),
+            "bullish_sectors": bullish_sec_list,
+            "timestamp": datetime.now(IST).strftime("%H:%M:%S")
+        }

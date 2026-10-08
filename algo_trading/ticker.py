@@ -172,6 +172,17 @@ class LiveTicker:
             self.ticker.unsubscribe(tokens)
             logger.info(f"Unsubscribed: {symbols}")
 
+    SYMBOL_ALIASES = {
+        "MCDOWELL-N": "UNITDSPR",
+        "MCDOWELL": "UNITDSPR",
+        "TATAMOTORS": "TMCV",
+        "PEL": "PIRAMALFIN",
+        "GUJGASLTD": "FLUOROCHEM",
+        "TVSMOTORS": "TVSMOTOR",
+        "IPCA": "IPCALAB",
+        "LTI": "LTIM",
+    }
+
     def _ensure_token_cache(self, exchange: str = "NSE") -> dict:
         """Caches instrument tokens in RAM for millisecond resolution."""
         if not hasattr(self, "_token_cache"):
@@ -185,6 +196,13 @@ class LiveTicker:
                     tok = inst.get("instrument_token")
                     if sym and tok:
                         lookup[sym] = tok
+                        lookup[sym.upper()] = tok
+
+                # Pre-populate known aliases if target symbol exists in lookup
+                for alias, target in self.SYMBOL_ALIASES.items():
+                    if target in lookup and alias not in lookup:
+                        lookup[alias] = lookup[target]
+
                 self._token_cache[exchange] = lookup
                 logger.info(f"⚡ Cached {len(lookup)} {exchange} instrument tokens for millisecond WebSocket lookup")
             except Exception as e:
@@ -195,10 +213,26 @@ class LiveTicker:
     def _get_instrument_token(self, symbol: str, exchange: str) -> Optional[int]:
         """Symbol ka instrument token lo (cached in RAM for millisecond resolution)"""
         cache = self._ensure_token_cache(exchange)
-        tok = cache.get(symbol)
+        sym_clean = symbol.strip().upper()
+        tok = cache.get(sym_clean)
         if tok:
             return tok
-        logger.warning(f"Token not found in cache for {symbol}")
+
+        # Check alias mapping
+        alias_target = self.SYMBOL_ALIASES.get(sym_clean)
+        if alias_target and alias_target in cache:
+            tok = cache[alias_target]
+            cache[sym_clean] = tok
+            return tok
+
+        # Check with/without common suffixes
+        for alt in [f"{sym_clean}-EQ", sym_clean.replace("-EQ", "")]:
+            if alt in cache:
+                tok = cache[alt]
+                cache[sym_clean] = tok
+                return tok
+
+        logger.debug(f"Token not found in cache for {symbol}")
         return None
 
     # ─────────────────────────────────────────────────────────

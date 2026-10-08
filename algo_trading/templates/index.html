@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Algo Trading Dashboard</title>
-    <link rel="stylesheet" href="/static/css/style.css?v=5">
+    <link rel="stylesheet" href="/static/css/style.css?v=6">
     <style>
         .wl-del-btn {
             background: transparent;
@@ -101,6 +101,414 @@
             border-color: #60a5fa;
             color: #93c5fd;
         }
+
+        /* ═══ Quant Strategy Live Scanner Modal - Redesigned ═══ */
+        .quant-scanner-box {
+            max-width: 1300px !important;
+            width: 97% !important;
+            max-height: 94vh;
+            display: flex;
+            flex-direction: column;
+            border-top: 3px solid #06b6d4 !important;
+            border-radius: 14px !important;
+            overflow: hidden;
+            box-shadow: 0 25px 60px rgba(0, 0, 0, 0.7), 0 0 0 1px rgba(6, 182, 212, 0.15) !important;
+        }
+
+        /* ── Header ── */
+        .qs-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 16px 22px;
+            background: linear-gradient(135deg, rgba(6, 182, 212, 0.12) 0%, rgba(15, 23, 42, 0.95) 60%);
+            border-bottom: 1px solid rgba(6, 182, 212, 0.2);
+            flex-shrink: 0;
+        }
+        .qs-header-left { display: flex; align-items: center; gap: 14px; }
+        .qs-header-icon {
+            width: 44px; height: 44px;
+            background: linear-gradient(135deg, rgba(6,182,212,0.25), rgba(6,182,212,0.08));
+            border: 1px solid rgba(6,182,212,0.35);
+            border-radius: 10px;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 22px;
+        }
+        .qs-header-title {
+            margin: 0; font-size: 17px; font-weight: 800;
+            color: #e0f7ff; letter-spacing: 0.3px;
+        }
+        .qs-header-sub {
+            font-size: 11px; color: #64748b; margin-top: 3px;
+            display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+        }
+        .qs-filter-dot {
+            display: inline-flex; align-items: center; gap: 4px;
+            color: #94a3b8; font-size: 10.5px;
+        }
+        .qs-filter-dot::before {
+            content: ''; display: inline-block;
+            width: 5px; height: 5px; border-radius: 50%;
+            background: #38bdf8;
+        }
+        .qs-header-actions { display: flex; align-items: center; gap: 8px; }
+        .qs-refresh-btn {
+            display: inline-flex; align-items: center; gap: 6px;
+            padding: 7px 16px; border-radius: 8px; font-size: 12px;
+            font-weight: 700; cursor: pointer; transition: all 0.2s;
+            background: rgba(6, 182, 212, 0.15);
+            border: 1px solid rgba(6, 182, 212, 0.4);
+            color: #38bdf8;
+        }
+        .qs-refresh-btn:hover {
+            background: rgba(6, 182, 212, 0.28);
+            box-shadow: 0 0 16px rgba(6, 182, 212, 0.3);
+            transform: translateY(-1px);
+        }
+        .qs-refresh-btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+        .qs-close-btn {
+            width: 32px; height: 32px;
+            background: rgba(255,255,255,0.05);
+            border: 1px solid rgba(255,255,255,0.12);
+            color: #94a3b8; border-radius: 8px;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 16px; cursor: pointer; transition: all 0.15s;
+        }
+        .qs-close-btn:hover { background: rgba(239,68,68,0.2); color: #f87171; border-color: rgba(239,68,68,0.3); }
+
+        /* ── Body ── */
+        .qs-body {
+            padding: 14px 20px;
+            flex: 1; overflow-y: auto;
+            display: flex; flex-direction: column; gap: 12px;
+        }
+
+        /* ── Filter Toolbar ── */
+        .qs-toolbar {
+            display: flex; justify-content: space-between; align-items: center;
+            gap: 10px; flex-wrap: wrap;
+        }
+        .qs-pill-group { display: flex; gap: 6px; flex-wrap: wrap; }
+        .qs-pill {
+            display: inline-flex; align-items: center; gap: 5px;
+            padding: 5px 12px; border-radius: 20px; font-size: 11.5px;
+            font-weight: 600; cursor: pointer; transition: all 0.18s;
+            background: rgba(255,255,255,0.05);
+            border: 1px solid rgba(255,255,255,0.1); color: #94a3b8;
+            white-space: nowrap;
+        }
+        .qs-pill:hover { background: rgba(59,130,246,0.15); color: #93c5fd; border-color: rgba(59,130,246,0.35); }
+        .qs-pill.active {
+            background: linear-gradient(135deg, #2563eb, #1d4ed8);
+            color: #fff; border-color: #3b82f6;
+            box-shadow: 0 2px 12px rgba(37,99,235,0.4);
+        }
+        .qs-pill.active-buy {
+            background: linear-gradient(135deg, #059669, #047857);
+            color: #fff; border-color: #10b981;
+            box-shadow: 0 2px 12px rgba(16,185,129,0.35);
+        }
+        .qs-pill-count {
+            background: rgba(255,255,255,0.18); border-radius: 10px;
+            padding: 1px 6px; font-size: 10px; font-weight: 700;
+        }
+        .qs-search-wrap { position: relative; }
+        .qs-search-wrap input {
+            width: 200px; padding: 7px 12px 7px 32px;
+            background: rgba(255,255,255,0.05);
+            border: 1px solid rgba(255,255,255,0.12);
+            border-radius: 8px; color: #e2e8f0; font-size: 12px;
+            transition: all 0.18s; outline: none;
+        }
+        .qs-search-wrap input:focus {
+            border-color: rgba(6,182,212,0.5);
+            background: rgba(6,182,212,0.06);
+            box-shadow: 0 0 0 3px rgba(6,182,212,0.1);
+        }
+        .qs-search-wrap input::placeholder { color: #475569; }
+        .qs-search-icon {
+            position: absolute; left: 10px; top: 50%;
+            transform: translateY(-50%); color: #475569; font-size: 13px; pointer-events: none;
+        }
+
+        /* ── Sectors Banner ── */
+        .qs-sectors-bar {
+            display: flex; align-items: center; gap: 10px;
+            padding: 10px 14px;
+            background: rgba(56, 189, 248, 0.05);
+            border: 1px solid rgba(56, 189, 248, 0.15);
+            border-radius: 10px; overflow-x: auto;
+        }
+        .qs-sectors-label {
+            font-size: 11.5px; font-weight: 700; color: #38bdf8;
+            white-space: nowrap; display: flex; align-items: center; gap: 5px;
+        }
+        .qs-sector-tag {
+            display: inline-flex; align-items: center; gap: 4px;
+            padding: 3px 10px; border-radius: 20px; font-size: 11px;
+            font-weight: 600; white-space: nowrap;
+            background: rgba(16, 185, 129, 0.12);
+            color: #34d399; border: 1px solid rgba(16,185,129,0.25);
+        }
+        .qs-sector-tag .sect-chg { font-size: 10px; opacity: 0.8; }
+
+        /* ── Table ── */
+        .quant-scanner-table-wrap {
+            overflow-x: auto; overflow-y: auto;
+            max-height: calc(94vh - 280px);
+            border: 1px solid rgba(255, 255, 255, 0.07);
+            border-radius: 10px;
+            background: #080d18;
+            flex: 1;
+        }
+        .quant-scanner-table {
+            width: 100%; min-width: 1080px;
+            border-collapse: collapse; font-size: 12.5px;
+            table-layout: fixed;
+        }
+        .quant-scanner-table thead {
+            position: sticky; top: 0; z-index: 10;
+            background: #0d1526;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.5);
+        }
+        .quant-scanner-table thead th {
+            padding: 11px 14px;
+            font-size: 10.5px; font-weight: 700;
+            text-transform: uppercase; letter-spacing: 0.7px;
+            color: #64748b;
+            border-bottom: 1px solid rgba(56, 189, 248, 0.18);
+            text-align: left; white-space: nowrap;
+        }
+        .quant-scanner-table thead th:first-child { padding-left: 18px; }
+        .quant-scanner-table tbody tr {
+            border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+            transition: background 0.15s ease;
+        }
+        .quant-scanner-table tbody tr:hover { background: rgba(59, 130, 246, 0.07); }
+        .quant-scanner-table tbody tr:last-child { border-bottom: none; }
+        .quant-scanner-table tbody tr.row-highlight-buy {
+            background: rgba(16, 185, 129, 0.06);
+            border-left: 3px solid #10b981;
+        }
+        .quant-scanner-table tbody tr.row-highlight-buy:hover { background: rgba(16, 185, 129, 0.12); }
+        .quant-scanner-table tbody td {
+            padding: 10px 12px;
+            vertical-align: middle; color: #cbd5e1;
+            overflow: hidden;
+            max-width: 0;        /* forces table-layout:fixed to respect col widths */
+        }
+        .quant-scanner-table tbody td:first-child { padding-left: 18px; }
+
+        /* OI Status column — ensure text wraps inside cell */
+        .quant-scanner-table tbody td:nth-child(5) {
+            overflow: visible;   /* allow badge to breathe */
+        }
+
+        /* ── Symbol Cell ── */
+        .qs-symbol-name {
+            font-size: 14px; font-weight: 800; color: #f1f5f9;
+            letter-spacing: 0.2px;
+        }
+        .qs-status-badge {
+            display: inline-flex; align-items: center; gap: 4px;
+            padding: 2px 8px; border-radius: 12px; font-size: 10px;
+            font-weight: 700; margin-top: 4px; white-space: nowrap;
+        }
+        .qs-status-badge.buy {
+            background: rgba(16,185,129,0.18); color: #34d399;
+            border: 1px solid rgba(16,185,129,0.35);
+            animation: pulse-green-border 2s infinite;
+        }
+        .qs-status-badge.candidate {
+            background: rgba(245,158,11,0.12); color: #fbbf24;
+            border: 1px solid rgba(245,158,11,0.25);
+        }
+        @keyframes pulse-green-border {
+            0%, 100% { box-shadow: 0 0 0 0 rgba(16,185,129,0); }
+            50% { box-shadow: 0 0 0 3px rgba(16,185,129,0.2); }
+        }
+
+        /* ── Price Cell ── */
+        .qs-ltp { font-size: 14px; font-weight: 700; color: #f8fafc; }
+        .qs-vwap { font-size: 11px; color: #64748b; margin-top: 3px; }
+
+        /* ── Day Change Cell ── */
+        .qs-chg { font-size: 13.5px; font-weight: 700; }
+        .qs-chg.up { color: #34d399; }
+        .qs-chg.down { color: #f87171; }
+        .qs-open-price { font-size: 11px; color: #64748b; margin-top: 3px; }
+
+        /* ── Trigger Pills ── */
+        .quant-trigger-pill {
+            display: inline-flex; align-items: center; gap: 4px;
+            padding: 3px 9px; border-radius: 6px;
+            font-size: 11px; font-weight: 600;
+            margin: 2px 3px 2px 0; white-space: nowrap;
+        }
+        .quant-trigger-pill.prev-day {
+            background: rgba(6, 182, 212, 0.12); color: #38bdf8;
+            border: 1px solid rgba(6, 182, 212, 0.28);
+        }
+        .quant-trigger-pill.pre-market {
+            background: rgba(245, 158, 11, 0.12); color: #fbbf24;
+            border: 1px solid rgba(245, 158, 11, 0.28);
+        }
+        .quant-trigger-pill.surge {
+            background: rgba(16, 185, 129, 0.12); color: #34d399;
+            border: 1px solid rgba(16, 185, 129, 0.28);
+        }
+        .quant-trigger-pill.sector {
+            background: rgba(168, 85, 247, 0.12); color: #c084fc;
+            border: 1px solid rgba(168, 85, 247, 0.28);
+        }
+
+        /* ── Short Covering / OI Status Card ── */
+        .qs-oi-box {
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+            padding: 5px 9px;
+            border-radius: 7px;
+            font-size: 11px;
+            width: 100%;
+            box-sizing: border-box;
+            overflow: hidden;
+        }
+        .qs-oi-box.confirmed {
+            background: rgba(16, 185, 129, 0.08);
+            border: 1px solid rgba(16, 185, 129, 0.25);
+            border-left: 3px solid #10b981;
+        }
+        .qs-oi-box.pending {
+            background: rgba(148, 163, 184, 0.06);
+            border: 1px solid rgba(148, 163, 184, 0.18);
+            border-left: 3px solid #64748b;
+        }
+        .qs-oi-head {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+            font-size: 11.5px;
+            font-weight: 700;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .qs-oi-box.confirmed .qs-oi-head { color: #34d399; }
+        .qs-oi-box.pending .qs-oi-head { color: #94a3b8; }
+        .qs-oi-icon { font-size: 11px; font-weight: 900; }
+        .qs-oi-sub {
+            font-size: 10px;
+            color: #94a3b8;
+            line-height: 1.35;
+            white-space: normal;
+            word-break: break-word;
+        }
+        .qs-oi-box.confirmed .qs-oi-sub { color: #a7f3d0; opacity: 0.9; }
+
+        /* ── Win Rate KPI Box ── */
+        .qs-wr-box {
+            display: inline-flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 5px 8px;
+            border-radius: 8px;
+            background: rgba(15, 23, 42, 0.75);
+            border: 1px solid rgba(255, 255, 255, 0.07);
+            min-width: 64px;
+            box-sizing: border-box;
+        }
+        .qs-wr-num {
+            font-size: 13px;
+            font-weight: 800;
+            line-height: 1.1;
+        }
+        .qs-wr-num.high { color: #34d399; }
+        .qs-wr-num.med { color: #fbbf24; }
+        .qs-wr-bar-bg {
+            width: 46px;
+            height: 4px;
+            background: rgba(255, 255, 255, 0.08);
+            border-radius: 4px;
+            margin: 4px 0 2px 0;
+            overflow: hidden;
+        }
+        .qs-wr-bar-fill {
+            height: 100%;
+            border-radius: 4px;
+        }
+        .qs-wr-bar-fill.high { background: linear-gradient(90deg, #059669, #34d399); }
+        .qs-wr-bar-fill.med { background: linear-gradient(90deg, #d97706, #fbbf24); }
+        .qs-wr-sub {
+            font-size: 9px;
+            font-weight: 700;
+            color: #64748b;
+            text-transform: uppercase;
+            letter-spacing: 0.4px;
+        }
+
+        /* ── SL / Targets Box ── */
+        .quant-sl-box {
+            background: rgba(15, 23, 42, 0.8);
+            border: 1px solid rgba(255, 255, 255, 0.07);
+            border-radius: 8px; padding: 6px 10px; font-size: 11px;
+            line-height: 1.5;
+        }
+        .qs-sl-line { color: #f87171; font-weight: 700; display: flex; align-items: center; gap: 4px; }
+        .qs-sl-pct { font-size: 9.5px; color: #94a3b8; font-weight: 500; }
+        .qs-t-line { color: #86efac; font-size: 10.5px; margin-top: 3px; }
+        .qs-t-sep { color: #334155; margin: 0 3px; }
+
+        /* ── Action Button ── */
+        .qs-buy-btn {
+            display: inline-flex; align-items: center; gap: 5px;
+            padding: 6px 14px; border-radius: 8px; font-size: 12px;
+            font-weight: 700; cursor: pointer; transition: all 0.2s;
+            background: linear-gradient(135deg, rgba(37,99,235,0.25), rgba(37,99,235,0.12));
+            border: 1px solid rgba(59,130,246,0.4); color: #93c5fd;
+            white-space: nowrap;
+        }
+        .qs-buy-btn:hover {
+            background: linear-gradient(135deg, #2563eb, #1d4ed8);
+            color: #fff; border-color: #3b82f6;
+            box-shadow: 0 4px 15px rgba(37,99,235,0.4);
+            transform: translateY(-1px);
+        }
+        .qs-intrade-badge {
+            display: inline-flex; align-items: center; gap: 4px;
+            padding: 5px 10px; border-radius: 8px; font-size: 11px;
+            font-weight: 700; white-space: nowrap;
+            background: rgba(6,182,212,0.12); color: #38bdf8;
+            border: 1px solid rgba(6,182,212,0.3);
+        }
+
+        /* ── Footer ── */
+        .qs-footer {
+            display: flex; justify-content: space-between; align-items: center;
+            padding: 10px 22px;
+            background: rgba(0,0,0,0.25);
+            border-top: 1px solid rgba(255,255,255,0.05);
+            flex-shrink: 0; flex-wrap: wrap; gap: 8px;
+        }
+        .qs-footer-left {
+            display: flex; align-items: center; gap: 6px;
+            font-size: 11px; color: #475569;
+        }
+        .qs-footer-left .dot { width: 6px; height: 6px; border-radius: 50%; background: #22c55e; animation: blink 1.5s infinite; }
+        @keyframes blink { 0%,100%{opacity:1;} 50%{opacity:0.3;} }
+        .qs-exit-rule {
+            display: inline-flex; align-items: center; gap: 5px;
+            font-size: 11px; color: #f87171; font-weight: 600;
+        }
+        .qs-footer-right { display: flex; gap: 8px; align-items: center; }
+        .qs-close-footer-btn {
+            padding: 6px 16px; border-radius: 8px; font-size: 12px;
+            font-weight: 600; cursor: pointer; transition: all 0.15s;
+            background: rgba(255,255,255,0.06);
+            border: 1px solid rgba(255,255,255,0.12); color: #94a3b8;
+        }
+        .qs-close-footer-btn:hover { background: rgba(255,255,255,0.12); color: #e2e8f0; }
     </style>
 </head>
 <body>
@@ -122,6 +530,11 @@
             <span class="nav-icon">⚡</span>
             <span class="nav-label">Algo Trade</span>
             <span class="nav-badge green" id="algotrade-badge">AUTO</span>
+        </a>
+        <a class="nav-item" data-page="mcx" onclick="showPage('mcx')">
+            <span class="nav-icon">🪙</span>
+            <span class="nav-label">MCX Commodity</span>
+            <span class="nav-badge yellow" id="mcx-badge">MCX</span>
         </a>
         <a class="nav-item" data-page="gainers" onclick="showPage('gainers')">
             <span class="nav-icon">🚀</span>
@@ -173,6 +586,13 @@
             <span class="nav-icon">🔄</span>
             <span class="nav-label">Open Reversals</span>
             <span class="nav-badge green" id="reversals-badge">NEW</span>
+        </a>
+
+        <div class="nav-group-label" style="margin-top:16px">SYSTEM</div>
+        <a class="nav-item" data-page="config" onclick="showPage('config')">
+            <span class="nav-icon">⚙️</span>
+            <span class="nav-label">Config & RMS</span>
+            <span class="nav-badge blue" id="config-badge">SETUP</span>
         </a>
     </nav>
 
@@ -1445,216 +1865,24 @@
                 </div>
             </div>
 
-            <!-- 3. RISK MANAGEMENT & UNIVERSE BAR -->
-            <div class="panel algo-rms-panel">
-                <div class="algo-rms-header">
-                    <div class="algo-rms-title-group">
-                        <div class="algo-rms-title">
-                            🛡️ <strong>Risk Management &amp; Circuit Breakers (RMS)</strong>
+            <!-- RMS QUICK BANNER & CONFIG LINK -->
+            <div class="panel" style="margin-bottom: 20px; padding: 14px 18px; background: linear-gradient(135deg, rgba(15, 23, 42, 0.85), rgba(30, 41, 59, 0.7)); border: 1px solid rgba(59, 130, 246, 0.25); display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;">
+                <div style="display: flex; align-items: center; gap: 12px;">
+                    <div style="font-size: 26px; line-height: 1;">🛡️</div>
+                    <div>
+                        <div style="display: flex; align-items: center; gap: 8px;">
+                            <strong style="color: #fff; font-size: 14px;">Risk Management &amp; Circuit Breakers (RMS)</strong>
+                            <span class="badge-pill green" id="algo-cb-status-badge-mini" style="font-size: 11px; padding: 2px 8px;">ARMED &amp; PROTECTED</span>
                         </div>
-                        <span class="algo-rms-sub">Autonomous Capital Shield • Daily Loss Cutoff • Profit Lock • Intraday Timing Guard</span>
-                    </div>
-
-                    <div class="algo-rms-header-actions">
-                        <!-- Normal Safe State Badge -->
-                        <span class="badge-pill green" id="algo-cb-status-badge">
-                            🛡️ RMS: ARMED &amp; PROTECTED
-                        </span>
-
-                        <!-- Triggered Alert Badge (Shown only if circuit breaker tripped) -->
-                        <div id="algo-circuit-breaker-alert" class="algo-cb-alert" style="display:none">
-                            ⚠️ <strong>CIRCUIT BREAKER:</strong> <span id="algo-cb-reason">Daily Loss Breached</span>
-                            <button class="btn btn-xs btn-yellow" onclick="resetCircuitBreaker()">Reset Lock</button>
+                        <div style="font-size: 11.5px; color: var(--text3); margin-top: 2px;">
+                            Autonomous Capital Shield • Daily Loss Cutoff • Profit Lock • Intraday Timing Guard
                         </div>
-
-                        <!-- Top Save Action Button -->
-                        <button class="btn btn-sm btn-blue rms-save-btn" onclick="saveAlgoRMS()" title="Save updated RMS rules">
-                            <span class="btn-icon">💾</span> Save RMS Rules
-                        </button>
                     </div>
                 </div>
-
-                <!-- 3 USER-FRIENDLY RMS CONTROL CARDS -->
-                <div class="algo-rms-card-container">
-
-                    <!-- CARD 1: 🛑 CAPITAL SHIELD (Loss & Profit Limits) -->
-                    <div class="algo-rms-card rms-card-capital">
-                        <div class="rms-card-header">
-                            <span class="rms-card-icon">🛑</span>
-                            <div>
-                                <div class="rms-card-title">Daily Capital Protection</div>
-                                <div class="rms-card-subtitle">Automated hard limits on daily P&amp;L</div>
-                            </div>
-                        </div>
-
-                        <div class="rms-card-body">
-                            <div class="rms-input-group">
-                                <label for="algo-rms-total-capital">
-                                    <span class="rms-label-tag blue">TOTAL TRADING CAPITAL</span>
-                                    <span id="algo-rms-cap-split-hint" class="rms-hint">₹5,000 / stock across 4 pos</span>
-                                </label>
-                                <div class="rms-input-wrapper" style="border: 1px solid rgba(59, 130, 246, 0.45); background: rgba(59, 130, 246, 0.05);">
-                                    <span class="rms-currency" style="color: #60a5fa; font-weight: 700;">₹</span>
-                                    <input type="number" id="algo-rms-total-capital" class="rms-styled-input" style="color: #93c5fd; font-weight: 700;" value="2000000" step="10000" min="1000" placeholder="2000000" oninput="updateCapitalSplitHint()">
-                                </div>
-                            </div>
-
-                            <div class="rms-row-2col">
-                                <div class="rms-input-group">
-                                    <label for="algo-rms-max-loss">
-                                        <span class="rms-label-tag red">MAX DAILY LOSS</span>
-                                        <span class="rms-hint">Halt bot if loss hits ₹</span>
-                                    </label>
-                                    <div class="rms-input-wrapper loss-border">
-                                        <span class="rms-currency red">₹</span>
-                                        <input type="number" id="algo-rms-max-loss" class="rms-styled-input red-text" value="1000" step="500" min="500" placeholder="1000">
-                                    </div>
-                                </div>
-
-                                <div class="rms-input-group">
-                                    <label for="algo-rms-max-profit">
-                                        <span class="rms-label-tag green">MAX DAILY PROFIT</span>
-                                        <span class="rms-hint">Lock gains &amp; halt bot at ₹</span>
-                                    </label>
-                                    <div class="rms-input-wrapper profit-border">
-                                        <span class="rms-currency green">₹</span>
-                                        <input type="number" id="algo-rms-max-profit" class="rms-styled-input green-text" value="5000" step="1000" min="1000" placeholder="5000">
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-
-                    <!-- CARD 2: 🎯 PORTFOLIO & QUALITY GATING -->
-                    <div class="algo-rms-card rms-card-execution">
-                        <div class="rms-card-header">
-                            <span class="rms-card-icon">🎯</span>
-                            <div>
-                                <div class="rms-card-title">Portfolio &amp; Quality Filter</div>
-                                <div class="rms-card-subtitle">Scanner basket &amp; setup probability</div>
-                            </div>
-                        </div>
-
-                        <div class="rms-card-body">
-                            <div class="rms-input-group">
-                                <label for="algo-universe-select">
-                                    <span class="rms-label-tag blue">SCAN UNIVERSE</span>
-                                    <span class="rms-hint">Stock list scanned for signals</span>
-                                </label>
-                                <select id="algo-universe-select" class="rms-styled-select" onchange="updateAlgoRMS()">
-                                    <option value="nifty50">🔵 Nifty 50 (Bluechips)</option>
-                                    <option value="all_stocks" selected>🌐 All Stocks (₹50–₹3,000 | MCap &gt; 100M)</option>
-                                    <option value="fno">🎯 Nifty F&amp;O (~185 Liquid Stocks)</option>
-                                    <option value="nifty100">📈 Nifty 100</option>
-                                    <option value="watchlist">⭐ My Watchlist</option>
-                                </select>
-                            </div>
-
-                            <div class="rms-row-2col">
-                                <div class="rms-input-group">
-                                    <label for="algo-rms-max-positions">
-                                        <span class="rms-label-tag yellow">MAX POSITIONS</span>
-                                        <span class="rms-hint">Concurrent open</span>
-                                    </label>
-                                    <select id="algo-rms-max-positions" class="rms-styled-select" onchange="updateCapitalSplitHint()">
-                                        <option value="1">1 Stock Max</option>
-                                        <option value="2">2 Stocks Max</option>
-                                        <option value="3">3 Stocks Max</option>
-                                        <option value="4" selected>4 Stocks Max</option>
-                                        <option value="5">5 Stocks Max</option>
-                                        <option value="8">8 Stocks Max</option>
-                                    </select>
-                                </div>
-
-                                <div class="rms-input-group">
-                                    <label for="algo-rms-min-winrate">
-                                        <span class="rms-label-tag cyan">MIN WIN RATE %</span>
-                                        <span class="rms-hint">Quality gate</span>
-                                    </label>
-                                    <select id="algo-rms-min-winrate" class="rms-styled-select">
-                                        <option value="50">50% Min</option>
-                                        <option value="55">55% Min</option>
-                                        <option value="60" selected>🔥 60% (Strict)</option>
-                                        <option value="65">65% (High Conf)</option>
-                                        <option value="70">70% (Elite Only)</option>
-                                    </select>
-                                </div>
-                            </div>
-
-                            <div class="rms-row-2col">
-                                <div class="rms-input-group">
-                                    <label for="algo-rms-min-price">
-                                        <span class="rms-label-tag cyan">PRICE RANGE (₹)</span>
-                                        <span class="rms-hint">₹50 – ₹3,000 Filter</span>
-                                    </label>
-                                    <div style="display:flex;align-items:center;gap:6px">
-                                        <input type="number" id="algo-rms-min-price" class="rms-styled-input" value="50" step="5" min="1" placeholder="50" style="width:48%;text-align:center" title="Min Stock Price (₹50)">
-                                        <span style="color:#64748b;font-size:12px;font-weight:700">–</span>
-                                        <input type="number" id="algo-rms-max-price" class="rms-styled-input" value="3000" step="100" min="100" placeholder="3000" style="width:48%;text-align:center" title="Max Stock Price (₹3,000)">
-                                    </div>
-                                </div>
-
-                                <div class="rms-input-group">
-                                    <label for="algo-rms-min-mcap">
-                                        <span class="rms-label-tag green">MIN MARKET CAP</span>
-                                        <span class="rms-hint">&gt; 100M Required</span>
-                                    </label>
-                                    <select id="algo-rms-min-mcap" class="rms-styled-select">
-                                        <option value="100" selected>&gt; 100M (₹10 Cr+)</option>
-                                        <option value="500">&gt; 500M (₹50 Cr+)</option>
-                                        <option value="1000">&gt; 1,000M (₹100 Cr+)</option>
-                                    </select>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-
-                    <!-- CARD 3: ⏱️ INTRADAY MARKET TIMING -->
-                    <div class="algo-rms-card rms-card-timing">
-                        <div class="rms-card-header">
-                            <span class="rms-card-icon">⏱️</span>
-                            <div>
-                                <div class="rms-card-title">Intraday Market Timing</div>
-                                <div class="rms-card-subtitle">NSE trading session boundaries (IST)</div>
-                            </div>
-                        </div>
-
-                        <div class="rms-card-body timing-body">
-                            <div class="rms-timing-item">
-                                <div class="rms-timing-left">
-                                    <span class="rms-timing-dot green"></span>
-                                    <div>
-                                        <div class="rms-timing-lbl">Fresh Entry Window</div>
-                                        <div class="rms-timing-val">09:20 AM – 02:45 PM</div>
-                                    </div>
-                                </div>
-                                <span class="rms-timing-badge active">Auto Scanning</span>
-                            </div>
-
-                            <div class="rms-timing-item">
-                                <div class="rms-timing-left">
-                                    <span class="rms-timing-dot yellow"></span>
-                                    <div>
-                                        <div class="rms-timing-lbl">New Entry Cutoff</div>
-                                        <div class="rms-timing-val">02:45 PM IST</div>
-                                    </div>
-                                </div>
-                                <span class="rms-timing-badge warning">Entries Paused</span>
-                            </div>
-
-                            <div class="rms-timing-item">
-                                <div class="rms-timing-left">
-                                    <span class="rms-timing-dot red"></span>
-                                    <div>
-                                        <div class="rms-timing-lbl">Auto Square-Off (MIS)</div>
-                                        <div class="rms-timing-val">03:15 PM IST</div>
-                                    </div>
-                                </div>
-                                <span class="rms-timing-badge danger">100% Closed</span>
-                            </div>
-                        </div>
-                    </div>
-
+                <div style="display: flex; align-items: center; gap: 10px;">
+                    <button class="btn btn-sm btn-blue" onclick="showPage('config')" style="display: flex; align-items: center; gap: 6px;">
+                        <span>⚙️</span> Manage RMS &amp; Trading Mode ➔
+                    </button>
                 </div>
             </div>
 
@@ -1664,12 +1892,17 @@
                     🤖 <strong>Quantitative Strategy Engine</strong>
                     <span class="algo-section-sub">Enable/Disable strategies &amp; customize parameters for auto buy/sell</span>
                 </div>
-                <div id="algo-strat-capital-summary" style="display:flex;align-items:center;gap:10px;font-size:12px;background:rgba(15,23,42,0.85);border:1px solid rgba(59,130,246,0.3);border-radius:20px;padding:5px 14px;box-shadow:0 2px 8px rgba(0,0,0,0.3)">
-                    <span>💰 Total Capital: <strong id="algo-summary-total-cap" style="color:#60a5fa">₹20,000</strong></span>
-                    <span style="color:rgba(148,163,184,0.3)">|</span>
-                    <span>⚡ Active Logics: <strong id="algo-summary-active-count" style="color:#34d399">7</strong></span>
-                    <span style="color:rgba(148,163,184,0.3)">|</span>
-                    <span>⚖️ Share / Logic: <strong id="algo-summary-share-cap" style="color:#38bdf8">₹2,857.14</strong></span>
+                <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+                    <button class="btn btn-sm btn-cyan" onclick="openQuantScannerModal('custom_quant_momentum')" style="display:inline-flex;align-items:center;gap:6px;padding:6px 14px;font-weight:600;box-shadow:0 2px 10px rgba(6,182,212,0.25);cursor:pointer">
+                        📋 Live Scanner Stocks Table
+                    </button>
+                    <div id="algo-strat-capital-summary" style="display:flex;align-items:center;gap:10px;font-size:12px;background:rgba(15,23,42,0.85);border:1px solid rgba(59,130,246,0.3);border-radius:20px;padding:5px 14px;box-shadow:0 2px 8px rgba(0,0,0,0.3)">
+                        <span>💰 Total Capital: <strong id="algo-summary-total-cap" style="color:#60a5fa">₹20,000</strong></span>
+                        <span style="color:rgba(148,163,184,0.3)">|</span>
+                        <span>⚡ Active Logics: <strong id="algo-summary-active-count" style="color:#34d399">8</strong></span>
+                        <span style="color:rgba(148,163,184,0.3)">|</span>
+                        <span>⚖️ Share / Logic: <strong id="algo-summary-share-cap" style="color:#38bdf8">₹2,500.00</strong></span>
+                    </div>
                 </div>
             </div>
 
@@ -1811,6 +2044,567 @@
         </section>
 
         <!-- ══════════════════════════════════════════════════
+             PAGE: 🪙 MCX COMMODITY ALGO TRADING
+        ═══════════════════════════════════════════════════ -->
+        <section id="page-mcx" class="page">
+            <!-- 1. MASTER HUD & CONTROLS BAR -->
+            <div class="algo-hud-card">
+                <div class="algo-hud-top">
+                    <div class="algo-hud-title-box">
+                        <div class="algo-title-row">
+                            <span class="algo-title-icon">🪙</span>
+                            <h2 class="algo-title">MCX Commodity Algo Trading</h2>
+                            <span class="badge-pill green" id="mcx-bot-status-badge">● ACTIVE</span>
+                            <span class="badge-pill purple" id="mcx-mode-badge">📄 PAPER (5X MARGIN)</span>
+                            <span class="badge-pill cyan" id="mcx-session-badge">⏰ EVENING SESSION (09:00 AM – 11:30 PM)</span>
+                        </div>
+                        <div class="algo-subtitle">
+                            Autonomous Commodity Robot • Gold, Silver, Crude Oil, Natural Gas • Multi-Timeframe Quant Strategies
+                        </div>
+                    </div>
+
+                    <div class="algo-hud-actions">
+                        <!-- Mode toggle -->
+                        <div class="algo-mode-switch-group">
+                            <button type="button" class="algo-mode-btn active" id="mcx-mode-paper-btn" onclick="setMcxMode('PAPER')">
+                                📄 Paper Mode
+                            </button>
+                            <button type="button" class="algo-mode-btn" id="mcx-mode-live-btn" onclick="setMcxMode('LIVE')">
+                                🔴 Live Broker
+                            </button>
+                        </div>
+
+                        <!-- Start / Pause button -->
+                        <button class="btn btn-yellow btn-algo-ctrl" id="mcx-bot-toggle-btn" onclick="toggleMcxBot()">
+                            ⏸ Pause Bot
+                        </button>
+                        <button class="btn btn-cyan btn-algo-ctrl" onclick="scanMcxNow()" title="Trigger immediate scan cycle">
+                            ⚡ Scan Now
+                        </button>
+                        <button class="btn btn-grey btn-algo-ctrl" onclick="fetchMcxStatus()" title="Refresh live rates">
+                            🔄 Refresh
+                        </button>
+                    </div>
+                </div>
+
+                <!-- 2. KPI METRICS STRIP -->
+                <div class="algo-kpi-strip">
+                    <div class="algo-kpi-item">
+                        <span class="algo-kpi-lbl">Today's Commodity P&amp;L</span>
+                        <span class="algo-kpi-val green" id="mcx-kpi-today-pnl">+₹0.00</span>
+                    </div>
+                    <div class="algo-kpi-item">
+                        <span class="algo-kpi-lbl">Realized P&amp;L</span>
+                        <span class="algo-kpi-val" id="mcx-kpi-realized-pnl">₹0.00</span>
+                    </div>
+                    <div class="algo-kpi-item">
+                        <span class="algo-kpi-lbl">Active Positions</span>
+                        <span class="algo-kpi-val yellow" id="mcx-kpi-positions-count">0</span>
+                    </div>
+                    <div class="algo-kpi-item">
+                        <span class="algo-kpi-lbl">Trades &amp; Win Rate</span>
+                        <span class="algo-kpi-val cyan" id="mcx-kpi-trades-count">0W / 0L (0%)</span>
+                    </div>
+                    <div class="algo-kpi-item">
+                        <span class="algo-kpi-lbl">Market Session</span>
+                        <span class="algo-kpi-val green" id="mcx-kpi-market-status">OPEN (Till 11:30 PM)</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 3. LIVE COMMODITIES WATCHLIST & EXECUTION CARDS -->
+            <div class="panel" style="margin-bottom:20px">
+                <div class="panel-header" style="display:flex;justify-content:space-between;align-items:center">
+                    <div>
+                        <h3 style="margin:0;font-size:15px">📡 Live Commodities Watchlist &amp; Setup Signals</h3>
+                        <div style="font-size:11px;color:var(--text3);margin-top:2px">
+                            Real-time quotes, lot sizes, strategy signals &amp; one-click paper trade execution
+                        </div>
+                    </div>
+                    <span class="badge-mini purple">6 Major Contracts</span>
+                </div>
+                <div class="algo-strategies-grid" id="mcx-commodities-grid" style="margin-top:14px">
+                    <div class="empty">Loading live MCX commodities...</div>
+                </div>
+            </div>
+
+            <!-- 4. ACTIVE MCX POSITIONS TABLE -->
+            <div class="panel" style="margin-bottom:20px">
+                <div class="panel-header">
+                    <h3 style="margin:0;font-size:15px">📈 Active Commodity Positions</h3>
+                </div>
+                <div class="table-container" style="margin-top:10px">
+                    <table class="table">
+                        <thead>
+                            <tr>
+                                <th>Commodity</th>
+                                <th>Side</th>
+                                <th>Quantity</th>
+                                <th>Entry Price</th>
+                                <th>Current LTP</th>
+                                <th>Target</th>
+                                <th>Stop Loss</th>
+                                <th>Live P&amp;L</th>
+                                <th>Time</th>
+                                <th>Action</th>
+                            </tr>
+                        </thead>
+                        <tbody id="mcx-positions-tbody">
+                            <tr><td colspan="10" class="empty">No active MCX commodity positions</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- 5. CLOSED MCX TRADES TABLE -->
+            <div class="panel" style="margin-bottom:20px">
+                <div class="panel-header">
+                    <h3 style="margin:0;font-size:15px">📑 Completed Commodity Trades (Today)</h3>
+                </div>
+                <div class="table-container" style="margin-top:10px">
+                    <table class="table">
+                        <thead>
+                            <tr>
+                                <th>Commodity</th>
+                                <th>Side</th>
+                                <th>Quantity</th>
+                                <th>Entry Price</th>
+                                <th>Exit Price</th>
+                                <th>Net P&amp;L</th>
+                                <th>Result</th>
+                                <th>Reason</th>
+                                <th>Exit Time</th>
+                            </tr>
+                        </thead>
+                        <tbody id="mcx-trades-tbody">
+                            <tr><td colspan="9" class="empty">No closed commodity trades today</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- 6. MCX ENGINE TELEMETRY LOGS -->
+            <div class="panel" style="margin-bottom:20px">
+                <div class="panel-header">
+                    <h3 style="margin:0;font-size:15px">🖥️ MCX Execution &amp; Signal Telemetry</h3>
+                </div>
+                <div class="algo-console" id="mcx-logs-console" style="margin-top:10px;max-height:220px;overflow-y:auto">
+                    <div class="algo-log-entry" style="color:var(--text3)">Waiting for MCX engine logs...</div>
+                </div>
+            </div>
+        </section>
+
+        <!-- ══ PAGE: CONFIGURATION & RMS ═════════════════════════ -->
+        <section id="page-config" class="page">
+            <div class="page-header" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px; margin-bottom: 20px;">
+                <div>
+                    <h2 style="margin: 0; font-size: 22px; font-weight: 700; color: #f8fafc; display: flex; align-items: center; gap: 10px;">
+                        <span>⚙️</span> System Configuration &amp; RMS
+                    </h2>
+                    <div style="color: var(--text3); font-size: 12px; margin-top: 4px;">
+                        Trading Mode (Live / Paper) • Paper Trading Sandbox • Hard Limits &amp; Circuit Breakers
+                    </div>
+                </div>
+                <div style="display: flex; gap: 10px; align-items: center;">
+                    <button class="btn btn-blue" onclick="loadConfigPageData()" style="display: flex; align-items: center; gap: 6px;">
+                        <span>🔄</span> Refresh
+                    </button>
+                    <button class="btn btn-green" onclick="saveAllConfigAndRMS()" style="display: flex; align-items: center; gap: 6px;">
+                        <span>💾</span> Save All Settings
+                    </button>
+                </div>
+            </div>
+
+            <!-- 1. TRADING EXECUTION MODE & BROKER STATUS (TWO CARDS) -->
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 16px; margin-bottom: 20px;">
+                
+                <!-- CARD A: EXECUTION MODE SWITCHER -->
+                <div class="panel" style="margin-bottom:0; padding: 18px 20px; border: 1px solid rgba(59, 130, 246, 0.25);">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px;">
+                        <div style="display: flex; align-items: center; gap: 8px;">
+                            <span style="font-size: 20px;">🎮</span>
+                            <div>
+                                <h3 style="margin:0; font-size: 15px; color: #fff;">Trading Execution Mode</h3>
+                                <div style="font-size: 11px; color: var(--text3);">Select active order routing mode</div>
+                            </div>
+                        </div>
+                        <span id="cfg-mode-active-pill" class="badge-pill blue" style="font-size: 11px; font-weight: 700; padding: 3px 10px;">
+                            PAPER TRADING
+                        </span>
+                    </div>
+
+                    <!-- Mode Toggle Cards -->
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 14px;">
+                        
+                        <!-- Paper Option Card -->
+                        <div id="cfg-mode-card-paper" onclick="selectConfigMode('PAPER')"
+                             style="cursor: pointer; padding: 14px 12px; border-radius: 8px; border: 2px solid #3b82f6; background: rgba(59, 130, 246, 0.12); transition: all 0.2s ease;">
+                            <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px;">
+                                <span style="font-size: 18px;">🧪</span>
+                                <span id="cfg-paper-selected-dot" style="font-size: 11px; color: #60a5fa; font-weight: 700;">● SELECTED</span>
+                            </div>
+                            <div style="font-weight: 700; font-size: 13px; color: #f1f5f9;">PAPER MODE</div>
+                            <div style="font-size: 11px; color: #94a3b8; margin-top: 3px;">
+                                5X Intraday Margin • Virtual Funds • Zero Real Risk
+                            </div>
+                        </div>
+
+                        <!-- Live Option Card -->
+                        <div id="cfg-mode-card-live" onclick="selectConfigMode('LIVE')"
+                             style="cursor: pointer; padding: 14px 12px; border-radius: 8px; border: 1px solid rgba(255, 255, 255, 0.1); background: rgba(255, 255, 255, 0.03); transition: all 0.2s ease;">
+                            <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px;">
+                                <span style="font-size: 18px;">🔴</span>
+                                <span id="cfg-live-selected-dot" style="font-size: 11px; color: #64748b; font-weight: 600;">○ INACTIVE</span>
+                            </div>
+                            <div style="font-weight: 700; font-size: 13px; color: #f1f5f9;">LIVE MODE</div>
+                            <div style="font-size: 11px; color: #94a3b8; margin-top: 3px;">
+                                Direct Zerodha Kite Orders • Real Capital Execution
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Switch Mode Action Button -->
+                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                        <span style="font-size: 11px; color: var(--text3);" id="cfg-mode-sync-hint">
+                            Saved automatically to .env &amp; Engine
+                        </span>
+                        <button id="cfg-btn-switch-mode" class="btn btn-sm btn-yellow" onclick="confirmSwitchMode()">
+                            ⚡ Apply Mode Switch
+                        </button>
+                    </div>
+                </div>
+
+                <!-- CARD B: BROKER CONNECTION & ACCOUNT TELEMETRY -->
+                <div class="panel" style="margin-bottom:0; padding: 18px 20px; border: 1px solid rgba(59, 130, 246, 0.25);">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+                        <div style="display: flex; align-items: center; gap: 8px;">
+                            <span style="font-size: 20px;">🏦</span>
+                            <div>
+                                <h3 style="margin:0; font-size: 15px; color: #fff;">Zerodha Kite Account</h3>
+                                <div style="font-size: 11px; color: var(--text3);">Live broker credentials &amp; margins</div>
+                            </div>
+                        </div>
+                        <span id="cfg-broker-status-pill" class="badge-pill green" style="font-size: 11px; font-weight: 700; padding: 3px 10px;">
+                            CONNECTED
+                        </span>
+                    </div>
+
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 12px;">
+                        <div style="background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 6px; padding: 8px 12px;">
+                            <div style="font-size: 10.5px; color: #94a3b8; font-weight: 600;">USER ID</div>
+                            <div style="font-size: 14px; font-weight: 700; color: #60a5fa;" id="cfg-broker-userid">DVY907</div>
+                        </div>
+                        <div style="background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 6px; padding: 8px 12px;">
+                            <div style="font-size: 10.5px; color: #94a3b8; font-weight: 600;">USER NAME</div>
+                            <div style="font-size: 14px; font-weight: 700; color: #f1f5f9;" id="cfg-broker-username">Sandeep Singh</div>
+                        </div>
+                        <div style="background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 6px; padding: 8px 12px;">
+                            <div style="font-size: 10.5px; color: #94a3b8; font-weight: 600;">EQUITY LIVE MARGIN</div>
+                            <div style="font-size: 14px; font-weight: 700; color: #34d399;" id="cfg-broker-equity-margin">₹4.00</div>
+                        </div>
+                        <div style="background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 6px; padding: 8px 12px;">
+                            <div style="font-size: 10.5px; color: #94a3b8; font-weight: 600;">COMMODITY LIVE MARGIN</div>
+                            <div style="font-size: 14px; font-weight: 700; color: #fbbf24;" id="cfg-broker-mcx-margin">₹0.00</div>
+                        </div>
+                    </div>
+
+                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                        <span style="font-size: 11px; color: #94a3b8;">Need fresh login session?</span>
+                        <a href="/login" class="btn btn-xs btn-blue" style="text-decoration:none;">🔑 Re-Login Kite Connect</a>
+                    </div>
+                </div>
+
+            </div>
+
+            <!-- 2. PAPER TRADING SANDBOX & CONTROLS -->
+            <div class="panel" style="margin-bottom: 20px; padding: 18px 20px; border: 1px solid rgba(59, 130, 246, 0.25);">
+                <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px; margin-bottom: 14px;">
+                    <div style="display: flex; align-items: center; gap: 10px;">
+                        <span style="font-size: 20px;">📝</span>
+                        <div>
+                            <h3 style="margin:0; font-size: 15px; color: #fff;">Paper Trading Sandbox &amp; Virtual Portfolio</h3>
+                            <div style="font-size: 11px; color: var(--text3);">Configure simulated capital, view performance, and reset virtual ledger</div>
+                        </div>
+                    </div>
+                    <div style="display: flex; gap: 8px; align-items: center;">
+                        <button class="btn btn-sm btn-grey" onclick="loadPaperStats()" title="Refresh paper stats">
+                            🔄 Refresh Paper
+                        </button>
+                        <button class="btn btn-sm btn-red" onclick="resetPaperPortfolioFromConfig()" title="Clear paper trades & positions">
+                            🗑️ Reset Paper Portfolio
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Paper Balance & Stats Strip -->
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 10px; margin-bottom: 16px;">
+                    <div style="background: rgba(59, 130, 246, 0.08); border: 1px solid rgba(59, 130, 246, 0.25); border-radius: 8px; padding: 10px 14px;">
+                        <div style="font-size: 11px; color: #93c5fd; font-weight: 600;">VIRTUAL NET CAPITAL</div>
+                        <div style="font-size: 17px; font-weight: 700; color: #f1f5f9; margin-top: 2px;" id="cfg-paper-net-cap">₹0</div>
+                        <div style="font-size: 10px; color: #64748b;">Starting + Realized P&amp;L</div>
+                    </div>
+                    <div style="background: rgba(255, 255, 255, 0.03); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 8px; padding: 10px 14px;">
+                        <div style="font-size: 11px; color: #94a3b8; font-weight: 600;">USED MARGIN (5X MIS)</div>
+                        <div style="font-size: 17px; font-weight: 700; color: #fbbf24; margin-top: 2px;" id="cfg-paper-used-margin">₹0</div>
+                        <div style="font-size: 10px; color: #64748b;">Active positions margin</div>
+                    </div>
+                    <div style="background: rgba(255, 255, 255, 0.03); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 8px; padding: 10px 14px;">
+                        <div style="font-size: 11px; color: #94a3b8; font-weight: 600;">AVAILABLE MARGIN</div>
+                        <div style="font-size: 17px; font-weight: 700; color: #34d399; margin-top: 2px;" id="cfg-paper-avail-margin">₹0</div>
+                        <div style="font-size: 10px; color: #64748b;">Free virtual capital</div>
+                    </div>
+                    <div style="background: rgba(255, 255, 255, 0.03); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 8px; padding: 10px 14px;">
+                        <div style="font-size: 11px; color: #94a3b8; font-weight: 600;">REALIZED P&amp;L</div>
+                        <div style="font-size: 17px; font-weight: 700; color: #f1f5f9; margin-top: 2px;" id="cfg-paper-realized-pnl">₹0.00</div>
+                        <div style="font-size: 10px; color: #64748b;">Closed paper trades</div>
+                    </div>
+                    <div style="background: rgba(255, 255, 255, 0.03); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 8px; padding: 10px 14px;">
+                        <div style="font-size: 11px; color: #94a3b8; font-weight: 600;">OPEN POSITIONS</div>
+                        <div style="font-size: 17px; font-weight: 700; color: #60a5fa; margin-top: 2px;" id="cfg-paper-open-count">0</div>
+                        <div style="font-size: 10px; color: #64748b;">Active paper trades</div>
+                    </div>
+                </div>
+
+                <!-- Virtual Capital Setter & Presets -->
+                <div style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; background: rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.06); border-radius: 8px; padding: 12px 16px;">
+                    <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
+                        <span style="font-size: 12px; font-weight: 600; color: #cbd5e1;">Quick Set Paper Capital:</span>
+                        <button class="btn btn-xs btn-blue" onclick="setVirtualCapitalPreset(50000)">₹50,000</button>
+                        <button class="btn btn-xs btn-blue" onclick="setVirtualCapitalPreset(100000)">₹1,00,000</button>
+                        <button class="btn btn-xs btn-blue" onclick="setVirtualCapitalPreset(500000)">₹5,00,000</button>
+                        <button class="btn btn-xs btn-blue" onclick="setVirtualCapitalPreset(1000000)">₹10,00,000</button>
+                        <button class="btn btn-xs btn-blue" onclick="setVirtualCapitalPreset(2500000)">₹25,00,000</button>
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                        <span style="font-size: 11px; color: #94a3b8;">Or enter custom capital in RMS card below</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 3. RISK MANAGEMENT & CIRCUIT BREAKERS (RMS) - FULL SECTION FROM USER IMAGE -->
+            <div class="panel algo-rms-panel">
+                <div class="algo-rms-header">
+                    <div class="algo-rms-title-group">
+                        <div class="algo-rms-title">
+                            🛡️ <strong>Risk Management &amp; Circuit Breakers (RMS)</strong>
+                        </div>
+                        <span class="algo-rms-sub">Autonomous Capital Shield • Daily Loss Cutoff • Profit Lock • Intraday Timing Guard</span>
+                    </div>
+
+                    <div class="algo-rms-header-actions">
+                        <!-- Normal Safe State Badge -->
+                        <span class="badge-pill green" id="algo-cb-status-badge">
+                            🛡️ RMS: ARMED &amp; PROTECTED
+                        </span>
+
+                        <!-- Triggered Alert Badge (Shown only if circuit breaker tripped) -->
+                        <div id="algo-circuit-breaker-alert" class="algo-cb-alert" style="display:none">
+                            ⚠️ <strong>CIRCUIT BREAKER:</strong> <span id="algo-cb-reason">Daily Loss Breached</span>
+                            <button class="btn btn-xs btn-yellow" onclick="resetCircuitBreaker()">Reset Lock</button>
+                        </div>
+
+                        <!-- Top Save Action Button -->
+                        <button class="btn btn-sm btn-blue rms-save-btn" onclick="saveAlgoRMS()" title="Save updated RMS rules">
+                            <span class="btn-icon">💾</span> Save RMS Rules
+                        </button>
+                    </div>
+                </div>
+
+                <!-- 3 USER-FRIENDLY RMS CONTROL CARDS -->
+                <div class="algo-rms-card-container">
+
+                    <!-- CARD 1: 🛑 CAPITAL SHIELD (Loss & Profit Limits) -->
+                    <div class="algo-rms-card rms-card-capital">
+                        <div class="rms-card-header">
+                            <span class="rms-card-icon">🛑</span>
+                            <div>
+                                <div class="rms-card-title">Daily Capital Protection</div>
+                                <div class="rms-card-subtitle">Automated hard limits on daily P&amp;L</div>
+                            </div>
+                        </div>
+
+                        <div class="rms-card-body">
+                            <div class="rms-input-group">
+                                <label for="algo-rms-total-capital">
+                                    <span class="rms-label-tag blue">TOTAL CAPITAL</span>
+                                    <span id="algo-rms-cap-split-hint" class="rms-hint">₹5,000 / stock across 4 pos</span>
+                                </label>
+                                <div class="rms-input-wrapper" style="border: 1px solid rgba(59, 130, 246, 0.45); background: rgba(59, 130, 246, 0.05);">
+                                    <span class="rms-currency" style="color: #60a5fa; font-weight: 700;">₹</span>
+                                    <input type="number" id="algo-rms-total-capital" class="rms-styled-input" style="color: #93c5fd; font-weight: 700;" value="2000000" step="10000" min="1000" placeholder="2000000" oninput="updateCapitalSplitHint()">
+                                </div>
+                            </div>
+
+                            <div class="rms-row-2col">
+                                <div class="rms-input-group">
+                                    <label for="algo-rms-max-loss">
+                                        <span class="rms-label-tag red">MAX DAILY LOSS</span>
+                                        <span class="rms-hint">Halt on loss</span>
+                                    </label>
+                                    <div class="rms-input-wrapper loss-border">
+                                        <span class="rms-currency red">₹</span>
+                                        <input type="number" id="algo-rms-max-loss" class="rms-styled-input red-text" value="1000" step="500" min="500" placeholder="1000">
+                                    </div>
+                                </div>
+
+                                <div class="rms-input-group">
+                                    <label for="algo-rms-max-profit">
+                                        <span class="rms-label-tag green">MAX DAILY PROFIT</span>
+                                        <span class="rms-hint">Lock profit</span>
+                                    </label>
+                                    <div class="rms-input-wrapper profit-border">
+                                        <span class="rms-currency green">₹</span>
+                                        <input type="number" id="algo-rms-max-profit" class="rms-styled-input green-text" value="5000" step="1000" min="1000" placeholder="5000">
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- CARD 2: 🎯 PORTFOLIO & QUALITY GATING -->
+                    <div class="algo-rms-card rms-card-execution">
+                        <div class="rms-card-header">
+                            <span class="rms-card-icon">🎯</span>
+                            <div>
+                                <div class="rms-card-title">Portfolio &amp; Quality Filter</div>
+                                <div class="rms-card-subtitle">Scanner basket &amp; setup probability</div>
+                            </div>
+                        </div>
+
+                        <div class="rms-card-body">
+                            <div class="rms-input-group">
+                                <label for="algo-universe-select">
+                                    <span class="rms-label-tag blue">SCAN UNIVERSE</span>
+                                    <span class="rms-hint">Stock list scanned for signals</span>
+                                </label>
+                                <select id="algo-universe-select" class="rms-styled-select" onchange="updateAlgoRMS()">
+                                    <option value="all_stocks" selected>🌐 All Market Stocks (Excl. Penny Stocks | ₹50–₹3,000)</option>
+                                    <option value="fno">🎯 Only F&amp;O Stocks (Derivatives Segment)</option>
+                                </select>
+                            </div>
+
+                            <div class="rms-row-2col">
+                                <div class="rms-input-group">
+                                    <label for="algo-rms-max-positions">
+                                        <span class="rms-label-tag yellow">MAX POSITIONS</span>
+                                        <span class="rms-hint">Concurrent open</span>
+                                    </label>
+                                    <select id="algo-rms-max-positions" class="rms-styled-select" onchange="updateCapitalSplitHint()">
+                                        <option value="1">1 Stock Max</option>
+                                        <option value="2">2 Stocks Max</option>
+                                        <option value="3">3 Stocks Max</option>
+                                        <option value="4" selected>4 Stocks Max</option>
+                                        <option value="5">5 Stocks Max</option>
+                                        <option value="8">8 Stocks Max</option>
+                                        <option value="15">15 Stocks Max</option>
+                                        <option value="20">20 Stocks Max</option>
+                                        <option value="25">25 Stocks Max</option>
+                                        <option value="30">30 Stocks Max</option>
+                                        <option value="50">50 Stocks Max</option>
+                                        <option value="75">75 Stocks Max</option>
+                                        <option value="100">100 Stocks Max</option>
+                                        <option value="150">150 Stocks Max</option>
+                                        <option value="200">200 Stocks Max</option>
+                                        <option value="250">250 Stocks Max</option>
+                                        <option value="300">300 Stocks Max</option>
+                                        <option value="500">500 Stocks Max</option>
+                                    </select>
+                                </div>
+
+                                <div class="rms-input-group">
+                                    <label for="algo-rms-min-winrate">
+                                        <span class="rms-label-tag cyan">MIN WIN RATE %</span>
+                                        <span class="rms-hint">Quality gate</span>
+                                    </label>
+                                    <select id="algo-rms-min-winrate" class="rms-styled-select">
+                                        <option value="50">50% Min</option>
+                                        <option value="55">55% Min</option>
+                                        <option value="60" selected>🔥 60% (Strict)</option>
+                                        <option value="65">65% (High Conf)</option>
+                                        <option value="70">70% (Elite Only)</option>
+                                    </select>
+                                </div>
+                            </div>
+
+                            <div class="rms-row-2col">
+                                <div class="rms-input-group">
+                                    <label for="algo-rms-min-price">
+                                        <span class="rms-label-tag cyan">PRICE RANGE (₹)</span>
+                                        <span class="rms-hint">₹50 – ₹3,000 Filter</span>
+                                    </label>
+                                    <div style="display:flex;align-items:center;gap:6px">
+                                        <input type="number" id="algo-rms-min-price" class="rms-styled-input" value="50" step="5" min="1" placeholder="50" style="width:48%;text-align:center" title="Min Stock Price (₹50)">
+                                        <span style="color:#64748b;font-size:12px;font-weight:700">–</span>
+                                        <input type="number" id="algo-rms-max-price" class="rms-styled-input" value="3000" step="100" min="100" placeholder="3000" style="width:48%;text-align:center" title="Max Stock Price (₹3,000)">
+                                    </div>
+                                </div>
+
+                                <div class="rms-input-group">
+                                    <label for="algo-rms-min-mcap">
+                                        <span class="rms-label-tag green">MIN MARKET CAP</span>
+                                        <span class="rms-hint">&gt; 100M Required</span>
+                                    </label>
+                                    <select id="algo-rms-min-mcap" class="rms-styled-select">
+                                        <option value="100" selected>&gt; 100M (₹10 Cr+)</option>
+                                        <option value="500">&gt; 500M (₹50 Cr+)</option>
+                                        <option value="1000">&gt; 1,000M (₹100 Cr+)</option>
+                                    </select>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- CARD 3: ⏱️ INTRADAY MARKET TIMING -->
+                    <div class="algo-rms-card rms-card-timing">
+                        <div class="rms-card-header">
+                            <span class="rms-card-icon">⏱️</span>
+                            <div>
+                                <div class="rms-card-title">Intraday Market Timing</div>
+                                <div class="rms-card-subtitle">NSE trading session boundaries (IST)</div>
+                            </div>
+                        </div>
+
+                        <div class="rms-card-body timing-body">
+                            <div class="rms-timing-item">
+                                <div class="rms-timing-left">
+                                    <span class="rms-timing-dot green"></span>
+                                    <div>
+                                        <div class="rms-timing-lbl">Fresh Entry Window</div>
+                                        <div class="rms-timing-val">09:20 AM – 02:45 PM</div>
+                                    </div>
+                                </div>
+                                <span class="rms-timing-badge active">Auto Scanning</span>
+                            </div>
+
+                            <div class="rms-timing-item">
+                                <div class="rms-timing-left">
+                                    <span class="rms-timing-dot yellow"></span>
+                                    <div>
+                                        <div class="rms-timing-lbl">New Entry Cutoff</div>
+                                        <div class="rms-timing-val">02:45 PM IST</div>
+                                    </div>
+                                </div>
+                                <span class="rms-timing-badge warning">Entries Paused</span>
+                            </div>
+
+                            <div class="rms-timing-item">
+                                <div class="rms-timing-left">
+                                    <span class="rms-timing-dot red"></span>
+                                    <div>
+                                        <div class="rms-timing-lbl">Auto Square-Off (MIS)</div>
+                                        <div class="rms-timing-val">03:15 PM IST</div>
+                                    </div>
+                                </div>
+                                <span class="rms-timing-badge danger">100% Closed</span>
+                            </div>
+                        </div>
+                    </div>
+
+                </div>
+            </div>
+        </section>
+
+        <!-- ══════════════════════════════════════════════════
              MODALS: STRATEGY CONFIG & KILL SWITCH CONFIRMATION
         ═══════════════════════════════════════════════════ -->
         <!-- Strategy Config Modal -->
@@ -1881,6 +2675,12 @@
                             <div style="font-size:11px;color:#94a3b8;margin-top:3px;line-height:1.4">
                                 💡 <em>Note: Is strategy ka capital badhane ya ghatane par bacha hua farak (Difference) baaki sabhi active strategies me se barabar (equally) adjust ho jayega.</em>
                             </div>
+                        </div>
+
+                        <div class="algo-modal-field">
+                            <label>Fixed Qty (Override) 📦</label>
+                            <input type="number" id="algo-modal-fixed-qty" class="ctrl-input" step="1" min="0" value="0" placeholder="0 = Auto (Capital Based)">
+                            <small class="algo-field-hint">0 = Capital se auto calculate hoga | >0 = Har trade mein exactly itni qty buy/sell hogi</small>
                         </div>
 
                         <div class="algo-modal-field">
@@ -2016,6 +2816,120 @@
             </div>
         </div>
 
+        <!-- Quantitative Strategy Live Scanner Stocks Modal (Table Format) -->
+        <!-- ══ Quantitative Strategy: Live Scanner Modal (Redesigned) ══ -->
+        <div id="algo-quant-scanner-modal" class="sc-modal" style="display:none">
+            <div class="sc-modal-box quant-scanner-box">
+
+                <!-- Header -->
+                <div class="qs-header">
+                    <div class="qs-header-left">
+                        <div class="qs-header-icon">🎯</div>
+                        <div>
+                            <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+                                <h3 class="qs-header-title" id="quant-scanner-title">Live Scanner Stocks List</h3>
+                                <span class="badge-mini purple" id="quant-scanner-strat-badge">4-Filter Confluence</span>
+                                <span class="badge-mini green" id="quant-scanner-count-badge">0 Found</span>
+                            </div>
+                            <div class="qs-header-sub">
+                                <span class="qs-filter-dot">Prev Day &gt;4.5%</span>
+                                <span class="qs-filter-dot">9:10 Pre-Market</span>
+                                <span class="qs-filter-dot">9:15 Surge ≥2%</span>
+                                <span class="qs-filter-dot">Bullish Sectors</span>
+                                <span style="color:#475569">• Auto Buy on Short Covering / OI Confirmation</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="qs-header-actions">
+                        <button class="qs-refresh-btn" onclick="fetchQuantScannerStocks()" id="quant-scanner-refresh-btn">
+                            🔄 Refresh
+                        </button>
+                        <button class="qs-close-btn" onclick="closeQuantScannerModal()" title="Close">✕</button>
+                    </div>
+                </div>
+
+                <!-- Body -->
+                <div class="qs-body">
+
+                    <!-- Filter Toolbar -->
+                    <div class="qs-toolbar">
+                        <div class="qs-pill-group" id="quant-scanner-pills">
+                            <button class="qs-pill active" onclick="filterQuantScannerCategory('ALL', this)">
+                                All Qualified <span class="qs-pill-count" id="quant-pill-all-cnt">0</span>
+                            </button>
+                            <button class="qs-pill" onclick="filterQuantScannerCategory('BUY_SIGNAL', this)" style="color:#34d399;border-color:rgba(16,185,129,0.25)">
+                                🟢 BUY Ready <span class="qs-pill-count" id="quant-pill-buy-cnt">0</span>
+                            </button>
+                            <button class="qs-pill" onclick="filterQuantScannerCategory('PREV_DAY', this)">📅 Prev Day &gt;4.5%</button>
+                            <button class="qs-pill" onclick="filterQuantScannerCategory('PRE_MARKET', this)">⏰ 9:10 Pre-Market</button>
+                            <button class="qs-pill" onclick="filterQuantScannerCategory('OPEN_SURGE', this)">🚀 9:15 Surge ≥2%</button>
+                            <button class="qs-pill" onclick="filterQuantScannerCategory('BULLISH_SECTOR', this)">🏢 Bullish Sectors</button>
+                        </div>
+                        <div class="qs-search-wrap">
+                            <span class="qs-search-icon">🔍</span>
+                            <input type="text" id="quant-scanner-search-input"
+                                   placeholder="Search Symbol / Trigger..."
+                                   oninput="filterQuantScannerSearch(this.value)">
+                        </div>
+                    </div>
+
+                    <!-- Bullish Sectors Banner -->
+                    <div id="quant-scanner-sectors-bar" class="qs-sectors-bar">
+                        <span class="qs-sectors-label">🏢 Bullish Sectors Today:</span>
+                        <div id="quant-scanner-sectors-tags" style="display:flex;gap:6px;flex-wrap:nowrap">
+                            <span style="color:#475569;font-size:11px">Scanning sectors...</span>
+                        </div>
+                    </div>
+
+                    <!-- Scanner Results Table -->
+                    <div class="quant-scanner-table-wrap">
+                        <table class="quant-scanner-table">
+                            <colgroup>
+                                <col style="width:130px">
+                                <col style="width:110px">
+                                <col style="width:105px">
+                                <col style="width:210px">
+                                <col style="width:270px">
+                                <col style="width:85px">
+                                <col style="width:175px">
+                                <col style="width:95px">
+                            </colgroup>
+                            <thead>
+                                <tr>
+                                    <th>Symbol</th>
+                                    <th>LTP / VWAP</th>
+                                    <th>Day Change</th>
+                                    <th>4-Filter Triggers</th>
+                                    <th>Short Covering / OI Status</th>
+                                    <th style="text-align:center">Win Rate</th>
+                                    <th>SL &amp; Targets</th>
+                                    <th style="text-align:center">Action</th>
+                                </tr>
+                            </thead>
+                            <tbody id="quant-scanner-tbody">
+                                <tr><td colspan="8" class="empty" style="text-align:center;padding:32px;color:#475569">
+                                    Click <strong style="color:#38bdf8">Refresh</strong> to scan universe stocks...
+                                </td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div><!-- /qs-body -->
+
+                <!-- Footer -->
+                <div class="qs-footer">
+                    <div class="qs-footer-left">
+                        <span class="dot"></span>
+                        <span id="quant-scanner-last-updated">Last scan: --</span>
+                    </div>
+                    <div class="qs-footer-right">
+                        <span class="qs-exit-rule">🛡️ Exit Rule: Auto Exits if price drops 1.5% from Peak High</span>
+                        <button class="qs-close-footer-btn" onclick="closeQuantScannerModal()">Close</button>
+                    </div>
+                </div>
+
+            </div>
+        </div>
+
         <!-- Emergency Kill Switch Confirmation Modal -->
         <div id="algo-kill-modal" class="sc-modal" style="display:none">
             <div class="sc-modal-box" style="max-width:450px;border-top:4px solid var(--red)">
@@ -2089,13 +3003,15 @@
 <!-- Toast -->
 <div id="toast" class="toast"></div>
 
-<script src="/static/js/app.js?v=3"></script>
+<script src="/static/js/app.js?v=4"></script>
 <script src="/static/js/market.js?v=2"></script>
 <script src="/static/js/scanner.js?v=4"></script>
 <script src="/static/js/heatmap.js?v=2"></script>
 <script src="/static/js/trade.js?v=2"></script>
 <script src="/static/js/paper.js?v=2"></script>
 <script src="/static/js/reversals.js?v=2"></script>
-<script src="/static/js/algotrade.js?v=12"></script>
+<script src="/static/js/algotrade.js?v=14"></script>
+<script src="/static/js/mcx.js?v=4"></script>
+<script src="/static/js/config.js?v=1"></script>
 </body>
 </html>

@@ -9,50 +9,32 @@ echo   Zerodha Algo Trading Bot - Starting...
 echo  =============================================
 echo.
 
-:: Port 5000 clear karo pehle
+:: Port 5000 clear karo pehle agar purana server chal raha ho
 for /f "tokens=5" %%a in ('netstat -aon 2^>nul ^| findstr "LISTENING" ^| findstr ":5000"') do (
     taskkill /f /pid %%a >nul 2>&1
 )
 
-:: Flask install check
+:: Flask & Certifi check
 python -c "import flask" 2>nul || pip install flask --prefer-binary -q
 python -c "import certifi" 2>nul || pip install certifi --prefer-binary -q
 
-echo  Starting backend...
+echo  Starting backend server...
 echo.
 
-:: Background mein server start karo
-start "AlgoBot" /b python web_app.py
+:: 3 second baad Chrome/browser automatically open karo
+start "" powershell -WindowStyle Hidden -NoProfile -Command "Start-Sleep -Seconds 3; Start-Process 'http://localhost:5000'"
 
-:: Wait for server
-echo  Waiting for server to start...
-timeout /t 5 /nobreak > nul
-
-:: Chrome mein kholo
-echo  Opening Chrome...
-set URL=http://localhost:5000
-
-:: Chrome paths check karo
-if exist "C:\Program Files\Google\Chrome\Application\chrome.exe" (
-    start "" "C:\Program Files\Google\Chrome\Application\chrome.exe" --new-window --start-maximized "%URL%"
-    goto :done
-)
-if exist "C:\Program Files (x86)\Google\Chrome\Application\chrome.exe" (
-    start "" "C:\Program Files (x86)\Google\Chrome\Application\chrome.exe" --new-window --start-maximized "%URL%"
-    goto :done
-)
-:: Fallback - default browser
-start "" "%URL%"
-
-:done
-echo.
 echo  =============================================
 echo   Bot running at: http://localhost:5000
-echo   Is window band mat karo!
-echo   Band karne ke liye: STOP.bat chalao
+echo   Band karne ke liye: STOP.bat chalaayein
 echo  =============================================
 echo.
 
-:: Server chal raha hai - window ko open rakhein
-echo Server is running... Press Ctrl+C or run STOP.bat to stop.
-pause > nul
+:: Foreground me python chalayein (logs dikhenge)
+python web_app.py
+
+if %ERRORLEVEL% NEQ 0 (
+    echo.
+    echo [ERROR] Server error aaya!
+    pause
+)

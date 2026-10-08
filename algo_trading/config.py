@@ -92,7 +92,7 @@ INTRADAY_CONFIG = {
     # Intraday watchlist (NSE symbols)
     "watchlist": [
         "RELIANCE", "TCS", "INFY", "HDFCBANK", "ICICIBANK",
-        "SBIN", "BAJFINANCE", "TATAMOTORS", "WIPRO", "AXISBANK",
+        "SBIN", "BAJFINANCE", "TMCV", "WIPRO", "AXISBANK",
         "TATASTEEL", "HINDALCO", "ONGC", "NTPC", "COALINDIA"
     ],
     "exchange": "NSE",
@@ -138,7 +138,7 @@ SWING_CONFIG = {
     # Swing trading watchlist (NSE + BSE)
     "watchlist": [
         "RELIANCE", "TCS", "INFY", "HDFCBANK", "ICICIBANK",
-        "SBIN", "BAJFINANCE", "TATAMOTORS", "WIPRO", "AXISBANK",
+        "SBIN", "BAJFINANCE", "TMCV", "WIPRO", "AXISBANK",
         "MARUTI", "SUNPHARMA", "DMART", "TITAN", "NESTLEIND",
         "ADANIPORTS", "ULTRACEMCO", "TECHM", "HCLTECH", "LT"
     ],
