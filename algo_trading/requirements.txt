@@ -1,3 +1,8 @@
+# Web Server
+flask>=3.0.0
+gunicorn>=21.2.0
+certifi
+
 # Zerodha Kite Connect
 kiteconnect==4.2.0
 
@@ -7,7 +12,6 @@ numpy>=2.0.0
 
 # Technical Indicators
 ta==0.11.0
-# pandas-ta has issues on newer Python - using 'ta' library instead
 
 # Scheduling
 schedule==1.2.1
@@ -27,11 +31,11 @@ requests==2.31.0
 websocket-client==1.7.0
 
 # Database (for trade logs)
-SQLAlchemy==2.0.23
+sqlalchemy>=2.0.23
 
 # Excel Reports
-openpyxl==3.1.2
-xlsxwriter==3.1.9
+openpyxl>=3.1.2
+xlsxwriter>=3.1.9
 
 # Plotting (optional)
 matplotlib>=3.9.0

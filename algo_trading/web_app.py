@@ -3021,10 +3021,11 @@ if __name__ == "__main__":
     for e in errors:
         logger.error(e)
 
-    logger.info("🌐 Starting Web Server → http://localhost:5000")
+    port = int(os.environ.get("PORT", 5000))
+    logger.info(f"🌐 Starting Web Server → http://0.0.0.0:{port}")
     app.run(
         host="0.0.0.0",
-        port=5000,
+        port=port,
         debug=False,
         use_reloader=False,
         threaded=True,
