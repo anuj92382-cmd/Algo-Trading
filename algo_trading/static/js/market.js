@@ -1,14 +1,30 @@
 /**
  * market.js - Gainers, Losers, All Stocks & Base Candle Breakout Screener
+ * Features:
+ *  - Previous Day Base Candle Detection (Body <= 50% Range)
+ *  - Live PDH/PDL Breakout & Near Breakout Tracking
+ *  - 100% Custom Native HTML5 Candlestick Chart with PDH/PDL Lines & Base Box Overlay
  */
 
-let _allStocksCache     = [];   // Full list cache
-let _allStocksSummary   = {};   // Summary counts cache
-let _selectedStock      = null; // Currently selected stock for chart
-let _currentChartTf     = 'D';  // Current chart timeframe: 'D', '15', '5', '1'
+let _allStocksCache      = [];   // Full list cache
+let _allStocksSummary    = {};   // Summary counts cache
+let _selectedStock       = null; // Currently selected stock for chart
+let _currentChartTf      = 'day';// Timeframe: 'day', '15minute', '5minute', 'minute'
 let _currentStatusFilter = 'all_triggers';
-let _stocksAutoTimer    = null;
-let _gainersLoaded      = false;
+let _stocksAutoTimer     = null;
+let _gainersLoaded       = false;
+
+// Custom Chart Interactive State
+let _chartCandlesData    = [];
+let _chartPrevDayData    = {};
+let _chartHoverIndex     = -1;
+let _chartMousePos       = null;
+let _chartCanvasElem     = null;
+let _chartVisibleCount   = 45;   // number of visible candles on screen
+let _chartOffset         = 0;    // scroll offset from end
+let _isChartDragging     = false;
+let _chartDragStartX     = 0;
+let _chartDragStartOffset = 0;
 
 // ─── GAINERS / LOSERS ────────────────────────────────────────
 async function loadGainersLosers() {
@@ -155,9 +171,8 @@ async function loadStocks(isSilent = false) {
         if (!_selectedStock || !_allStocksCache.some(s => s.symbol === _selectedStock.symbol)) {
             selectStockForChart(_allStocksCache[0]);
         } else {
-            // Update selected stock with fresh price data
             const fresh = _allStocksCache.find(s => s.symbol === _selectedStock.symbol);
-            if (fresh) selectStockForChart(fresh, false); // don't reload iframe unnecessarily
+            if (fresh) selectStockForChart(fresh, false);
         }
     }
 }
@@ -214,11 +229,9 @@ function renderStocksTable(stocks) {
             baseBodyBadge = `<span class="sc-body-pill expansion" title="Trend/Expansion">${s.body_ratio_pct}% Wide</span>`;
         }
 
-        // Change color
         const cc = s.change_pct > 0 ? 'green' : s.change_pct < 0 ? 'red' : 'dim';
         const sign = s.change_pct > 0 ? '+' : '';
 
-        // Distance format
         let distHtml = '';
         if (s.status === 'HIGH_BREAKOUT') {
             distHtml = `<span class="green"><b>+${s.distance_pct.toFixed(2)}%</b> above PDH</span>`;
@@ -269,11 +282,11 @@ function onStockRowClicked(symbol) {
     }
 }
 
-function selectStockForChart(stock, reloadIframe = true) {
+function selectStockForChart(stock, reloadChart = true) {
     if (!stock) return;
     _selectedStock = stock;
 
-    // Highlight row
+    // Highlight active row in table
     document.querySelectorAll('.screener-row').forEach(r => r.classList.remove('selected-row'));
     const activeRow = document.getElementById(`row-${stock.symbol}`);
     if (activeRow) activeRow.classList.add('selected-row');
@@ -291,7 +304,6 @@ function selectStockForChart(stock, reloadIframe = true) {
         chgEl.className = `chart-chg ${cc}`;
     }
 
-    // External TV link
     const extLink = document.getElementById('chart-external-link');
     if (extLink) {
         extLink.href = `https://in.tradingview.com/chart/?symbol=NSE:${encodeURIComponent(stock.symbol)}`;
@@ -322,66 +334,400 @@ function selectStockForChart(stock, reloadIframe = true) {
     }
     setText('chart-lvl-dist', distText);
 
-    // Embed TradingView Chart
-    if (reloadIframe) {
-        embedTradingViewChart(stock.symbol, _currentChartTf);
+    // Render Custom Canvas Candlestick Chart
+    if (reloadChart) {
+        _chartOffset = 0;
+        loadCustomCandleChart(stock.symbol, _currentChartTf);
     }
 }
 
 function changeChartTimeframe(tf, btn) {
-    _currentChartTf = tf;
-    document.querySelectorAll('.chart-tf-btn').forEach(b => b.classList.remove('active'));
+    // Map button key to API interval
+    const tfMap = {
+        'D': 'day',
+        '15': '15minute',
+        '5': '5minute',
+        '1': 'minute',
+    };
+    _currentChartTf = tfMap[tf] || tf;
+
+    document.querySelectorAll('.chart-tf-group .chart-tf-btn').forEach(b => b.classList.remove('active'));
     if (btn) btn.classList.add('active');
 
     if (_selectedStock) {
-        embedTradingViewChart(_selectedStock.symbol, tf);
+        _chartOffset = 0;
+        loadCustomCandleChart(_selectedStock.symbol, _currentChartTf);
     }
 }
 
-function embedTradingViewChart(symbol, interval = 'D') {
+
+// ═══════════════════════════════════════════════════════════════
+// 🌟 100% INDEPENDENT CUSTOM HTML5 CANDLESTICK CHART ENGINE
+// ═══════════════════════════════════════════════════════════════
+
+async function loadCustomCandleChart(symbol, interval = 'day') {
     const container = document.getElementById('stocks-chart-embed');
     if (!container) return;
 
-    container.innerHTML = `<div id="tv_chart_container" style="width:100%;height:100%;"></div>`;
+    container.innerHTML = `
+        <div class="custom-chart-wrapper">
+            <div class="custom-chart-infobar" id="custom-chart-infobar">
+                <span class="cc-info-sym"><b>${symbol}</b> (${interval.toUpperCase()})</span>
+                <span class="cc-info-val" id="cc-hover-data">⏳ Loading live candlestick data...</span>
+            </div>
+            <div class="custom-chart-canvas-box" id="cc-canvas-box">
+                <canvas id="custom-candle-canvas"></canvas>
+            </div>
+            <div class="custom-chart-legend">
+                <span class="c-leg-item"><span class="c-leg-line green-dash"></span> PDH (Prev High)</span>
+                <span class="c-leg-item"><span class="c-leg-line red-dash"></span> PDL (Prev Low)</span>
+                <span class="c-leg-item"><span class="c-leg-box purple-box"></span> Base Zone</span>
+                <span class="c-leg-item"><span class="c-leg-line cyan-solid"></span> Live LTP</span>
+                <span class="c-leg-hint">🖱️ Drag to pan • Scroll to zoom</span>
+            </div>
+        </div>
+    `;
 
-    let tf = interval;
-    if (tf === '1D') tf = 'D';
+    const res = await api(`/api/chart/candles?symbol=${encodeURIComponent(symbol)}&interval=${encodeURIComponent(interval)}`);
+    if (!res || !res.candles || res.candles.length === 0) {
+        const infobar = document.getElementById('cc-hover-data');
+        if (infobar) infobar.innerHTML = `<span class="red">⚠️ No candlestick history returned from Kite API</span>`;
+        return;
+    }
 
-    function renderTV() {
-        try {
-            new TradingView.widget({
-                "autosize": true,
-                "symbol": `NSE:${symbol}`,
-                "interval": tf,
-                "timezone": "Asia/Kolkata",
-                "theme": "dark",
-                "style": "1",
-                "locale": "in",
-                "toolbar_bg": "#131722",
-                "enable_publishing": false,
-                "hide_top_toolbar": false,
-                "hide_side_toolbar": false,
-                "allow_symbol_change": true,
-                "container_id": "tv_chart_container",
-                "withdateranges": true,
-                "save_image": false,
-                "studies": [
-                    "MASimple@tv-basicstudies",
-                    "Volume@tv-basicstudies"
-                ]
-            });
-        } catch (e) {
-            console.error('TradingView init error:', e);
+    _chartCandlesData = res.candles || [];
+    _chartPrevDayData = res.prev_day || {};
+
+    initCustomCanvasEvents();
+    drawCustomChart();
+}
+
+function initCustomCanvasEvents() {
+    const canvas = document.getElementById('custom-candle-canvas');
+    if (!canvas) return;
+    _chartCanvasElem = canvas;
+
+    // Mouse Move (Crosshair & Tooltip)
+    canvas.onmousemove = (e) => {
+        const rect = canvas.getBoundingClientRect();
+        _chartMousePos = {
+            x: e.clientX - rect.left,
+            y: e.clientY - rect.top,
+        };
+
+        if (_isChartDragging) {
+            const deltaX = e.clientX - _chartDragStartX;
+            const candlesMoved = Math.round(deltaX / (canvas.clientWidth / _chartVisibleCount));
+            _chartOffset = Math.max(0, Math.min(_chartCandlesData.length - _chartVisibleCount, _chartDragStartOffset + candlesMoved));
+        }
+
+        drawCustomChart();
+    };
+
+    // Mouse Leave
+    canvas.onmouseleave = () => {
+        _chartMousePos = null;
+        _chartHoverIndex = -1;
+        _isChartDragging = false;
+        drawCustomChart();
+    };
+
+    // Mouse Down (Pan drag)
+    canvas.onmousedown = (e) => {
+        _isChartDragging = true;
+        _chartDragStartX = e.clientX;
+        _chartDragStartOffset = _chartOffset;
+    };
+
+    // Mouse Up
+    window.onmouseup = () => {
+        _isChartDragging = false;
+    };
+
+    // Mouse Wheel (Zoom in / out)
+    canvas.onwheel = (e) => {
+        e.preventDefault();
+        if (e.deltaY < 0) {
+            // Zoom in
+            _chartVisibleCount = Math.max(15, _chartVisibleCount - 4);
+        } else {
+            // Zoom out
+            _chartVisibleCount = Math.min(Math.min(120, _chartCandlesData.length), _chartVisibleCount + 4);
+        }
+        drawCustomChart();
+    };
+
+    // Resize Observer
+    const resizeObserver = new ResizeObserver(() => {
+        drawCustomChart();
+    });
+    const box = document.getElementById('cc-canvas-box');
+    if (box) resizeObserver.observe(box);
+}
+
+function drawCustomChart() {
+    const canvas = document.getElementById('custom-candle-canvas');
+    if (!canvas || !_chartCandlesData || _chartCandlesData.length === 0) return;
+
+    const ctx = canvas.getContext('2d');
+    const box = canvas.parentElement;
+    const width = box.clientWidth || 400;
+    const height = box.clientHeight || 450;
+
+    const dpr = window.devicePixelRatio || 1;
+    canvas.width = width * dpr;
+    canvas.height = height * dpr;
+    canvas.style.width = width + 'px';
+    canvas.style.height = height + 'px';
+
+    ctx.scale(dpr, dpr);
+    ctx.clearRect(0, 0, width, height);
+
+    // Padding configuration
+    const padTop = 20;
+    const padBottom = 30;
+    const padRight = 65; // Price scale
+    const padLeft = 10;
+    const volHeight = Math.max(50, height * 0.16);
+    const mainHeight = height - padTop - padBottom - volHeight;
+
+    // Slice visible window
+    const totalCandles = _chartCandlesData.length;
+    const count = Math.min(totalCandles, _chartVisibleCount);
+    const endIndex = Math.max(count, totalCandles - _chartOffset);
+    const startIndex = Math.max(0, endIndex - count);
+    const visibleData = _chartCandlesData.slice(startIndex, endIndex);
+
+    if (visibleData.length === 0) return;
+
+    // Determine min & max price
+    let minPrice = Infinity;
+    let maxPrice = -Infinity;
+    let maxVol = 0;
+
+    visibleData.forEach(c => {
+        if (c.low < minPrice) minPrice = c.low;
+        if (c.high > maxPrice) maxPrice = c.high;
+        if (c.volume > maxVol) maxVol = c.volume;
+    });
+
+    const pdh = _chartPrevDayData.high || 0;
+    const pdl = _chartPrevDayData.low || 0;
+    const ltp = _selectedStock ? _selectedStock.ltp : 0;
+
+    if (pdh > 0) maxPrice = Math.max(maxPrice, pdh);
+    if (pdl > 0 && pdl < Infinity) minPrice = Math.min(minPrice, pdl);
+    if (ltp > 0) {
+        maxPrice = Math.max(maxPrice, ltp);
+        minPrice = Math.min(minPrice, ltp);
+    }
+
+    // Add 4% vertical padding
+    const pMargin = (maxPrice - minPrice) * 0.04 || 1;
+    maxPrice += pMargin;
+    minPrice -= pMargin;
+    const priceRange = maxPrice - minPrice || 1;
+
+    // Coordinate mapping functions
+    const chartW = width - padLeft - padRight;
+    const candleW = chartW / visibleData.length;
+    const bodyW = Math.max(2, candleW * 0.72);
+
+    const getY = (price) => padTop + (1 - (price - minPrice) / priceRange) * mainHeight;
+    const getX = (idx) => padLeft + (idx + 0.5) * candleW;
+
+    // ── 1. Draw Background Grid & Price Labels ──
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.05)';
+    ctx.lineWidth = 1;
+    ctx.fillStyle = '#64748b';
+    ctx.font = '10px monospace';
+    ctx.textAlign = 'left';
+
+    const gridSteps = 6;
+    for (let i = 0; i <= gridSteps; i++) {
+        const p = minPrice + (i / gridSteps) * priceRange;
+        const y = getY(p);
+
+        ctx.beginPath();
+        ctx.moveTo(padLeft, y);
+        ctx.lineTo(width - padRight, y);
+        ctx.stroke();
+
+        ctx.fillText('₹' + p.toFixed(2), width - padRight + 6, y + 3);
+    }
+
+    // ── 2. Draw Previous Day Shaded Base Zone ──
+    if (pdh > 0 && pdl > 0 && pdh > pdl) {
+        const yPdh = getY(pdh);
+        const yPdl = getY(pdl);
+        const baseBoxH = Math.abs(yPdl - yPdh);
+
+        ctx.fillStyle = 'rgba(139, 92, 246, 0.10)';
+        ctx.fillRect(padLeft, Math.min(yPdh, yPdl), chartW, baseBoxH);
+
+        // Border
+        ctx.strokeStyle = 'rgba(139, 92, 246, 0.25)';
+        ctx.setLineDash([3, 3]);
+        ctx.strokeRect(padLeft, Math.min(yPdh, yPdl), chartW, baseBoxH);
+        ctx.setLineDash([]);
+    }
+
+    // ── 3. Draw PDH (Green Dotted) & PDL (Red Dotted) Reference Lines ──
+    if (pdh > 0) {
+        const yPdh = getY(pdh);
+        ctx.strokeStyle = '#10b981';
+        ctx.lineWidth = 1.5;
+        ctx.setLineDash([5, 4]);
+        ctx.beginPath();
+        ctx.moveTo(padLeft, yPdh);
+        ctx.lineTo(width - padRight, yPdh);
+        ctx.stroke();
+        ctx.setLineDash([]);
+
+        // PDH Badge on axis
+        ctx.fillStyle = '#10b981';
+        ctx.fillRect(width - padRight + 2, yPdh - 8, padRight - 4, 16);
+        ctx.fillStyle = '#000000';
+        ctx.font = 'bold 9.5px monospace';
+        ctx.fillText('PDH ' + pdh.toFixed(1), width - padRight + 5, yPdh + 3.5);
+    }
+
+    if (pdl > 0) {
+        const yPdl = getY(pdl);
+        ctx.strokeStyle = '#ef4444';
+        ctx.lineWidth = 1.5;
+        ctx.setLineDash([5, 4]);
+        ctx.beginPath();
+        ctx.moveTo(padLeft, yPdl);
+        ctx.lineTo(width - padRight, yPdl);
+        ctx.stroke();
+        ctx.setLineDash([]);
+
+        // PDL Badge on axis
+        ctx.fillStyle = '#ef4444';
+        ctx.fillRect(width - padRight + 2, yPdl - 8, padRight - 4, 16);
+        ctx.fillStyle = '#ffffff';
+        ctx.font = 'bold 9.5px monospace';
+        ctx.fillText('PDL ' + pdl.toFixed(1), width - padRight + 5, yPdl + 3.5);
+    }
+
+    // ── 4. Draw Volume Bars ──
+    const volTop = padTop + mainHeight + 8;
+    visibleData.forEach((c, idx) => {
+        const x = getX(idx);
+        const isBull = c.close >= c.open;
+        const vH = maxVol > 0 ? (c.volume / maxVol) * (volHeight - 12) : 0;
+        const vY = volTop + (volHeight - 12) - vH;
+
+        ctx.fillStyle = isBull ? 'rgba(16, 185, 129, 0.25)' : 'rgba(239, 68, 68, 0.25)';
+        ctx.fillRect(x - bodyW / 2, vY, bodyW, vH);
+    });
+
+    // ── 5. Draw Candlesticks ──
+    visibleData.forEach((c, idx) => {
+        const x = getX(idx);
+        const yOpen = getY(c.open);
+        const yClose = getY(c.close);
+        const yHigh = getY(c.high);
+        const yLow = getY(c.low);
+
+        const isBull = c.close >= c.open;
+        const color = isBull ? '#10b981' : '#ef4444';
+
+        // Draw Wick (High to Low line)
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 1.4;
+        ctx.beginPath();
+        ctx.moveTo(x, yHigh);
+        ctx.lineTo(x, yLow);
+        ctx.stroke();
+
+        // Draw Candle Body
+        const topY = Math.min(yOpen, yClose);
+        const bodyH = Math.max(2, Math.abs(yClose - yOpen));
+
+        ctx.fillStyle = color;
+        ctx.fillRect(x - bodyW / 2, topY, bodyW, bodyH);
+    });
+
+    // ── 6. Draw Current LTP Line ──
+    if (ltp > 0) {
+        const yLtp = getY(ltp);
+        ctx.strokeStyle = '#38bdf8';
+        ctx.lineWidth = 1.2;
+        ctx.setLineDash([4, 3]);
+        ctx.beginPath();
+        ctx.moveTo(padLeft, yLtp);
+        ctx.lineTo(width - padRight, yLtp);
+        ctx.stroke();
+        ctx.setLineDash([]);
+
+        // Live LTP Pulse badge on axis
+        ctx.fillStyle = '#38bdf8';
+        ctx.fillRect(width - padRight + 2, yLtp - 9, padRight - 4, 18);
+        ctx.fillStyle = '#0f172a';
+        ctx.font = 'bold 10px monospace';
+        ctx.fillText('₹' + ltp.toFixed(2), width - padRight + 5, yLtp + 3.5);
+    }
+
+    // ── 7. Crosshair & Hover Tooltip ──
+    let hoverCandle = null;
+    if (_chartMousePos && _chartMousePos.x >= padLeft && _chartMousePos.x <= width - padRight) {
+        const relX = _chartMousePos.x - padLeft;
+        const hoverIdx = Math.min(visibleData.length - 1, Math.max(0, Math.floor(relX / candleW)));
+        hoverCandle = visibleData[hoverIdx];
+        const hX = getX(hoverIdx);
+        const hY = _chartMousePos.y;
+
+        // Vertical crosshair
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.35)';
+        ctx.lineWidth = 1;
+        ctx.setLineDash([3, 3]);
+        ctx.beginPath();
+        ctx.moveTo(hX, padTop);
+        ctx.lineTo(hX, height - padBottom);
+        ctx.stroke();
+
+        // Horizontal crosshair
+        ctx.beginPath();
+        ctx.moveTo(padLeft, hY);
+        ctx.lineTo(width - padRight, hY);
+        ctx.stroke();
+        ctx.setLineDash([]);
+
+        // Date pill on bottom axis
+        if (hoverCandle) {
+            const timeStr = hoverCandle.time.substring(5);
+            ctx.fillStyle = '#3b82f6';
+            ctx.fillRect(hX - 35, height - padBottom + 4, 70, 16);
+            ctx.fillStyle = '#ffffff';
+            ctx.font = '10px monospace';
+            ctx.textAlign = 'center';
+            ctx.fillText(timeStr, hX, height - padBottom + 16);
+            ctx.textAlign = 'left';
         }
     }
 
-    if (typeof TradingView !== 'undefined' && TradingView.widget) {
-        renderTV();
-    } else {
-        const script = document.createElement('script');
-        script.src = 'https://s3.tradingview.com/tv.js';
-        script.onload = renderTV;
-        document.head.appendChild(script);
+    // Update Top Info Bar
+    const targetCandle = hoverCandle || visibleData[visibleData.length - 1];
+    if (targetCandle) {
+        const infobar = document.getElementById('cc-hover-data');
+        if (infobar) {
+            const chg = targetCandle.close - targetCandle.open;
+            const chgPct = targetCandle.open > 0 ? (chg / targetCandle.open * 100) : 0;
+            const cc = chg >= 0 ? '#34d399' : '#f87171';
+            const sign = chg >= 0 ? '+' : '';
+
+            infobar.innerHTML = `
+                <span><b>Time:</b> ${targetCandle.time}</span> |
+                <span><b>O:</b> ₹${targetCandle.open.toFixed(2)}</span> |
+                <span><b>H:</b> ₹${targetCandle.high.toFixed(2)}</span> |
+                <span><b>L:</b> ₹${targetCandle.low.toFixed(2)}</span> |
+                <span><b>C:</b> ₹${targetCandle.close.toFixed(2)}</span> |
+                <span style="color:${cc}"><b>${sign}${chgPct.toFixed(2)}%</b></span> |
+                <span><b>Vol:</b> ${fmtVol(targetCandle.volume)}</span>
+            `;
+        }
     }
 }
 

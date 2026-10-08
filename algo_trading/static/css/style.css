@@ -4652,3 +4652,105 @@ table tbody td a:hover {
     background: rgba(15,23,42,0.4);
 }
 
+/* ── Custom HTML5 Candlestick Chart ── */
+.custom-chart-wrapper {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    width: 100%;
+    background: #0b0f19;
+    position: relative;
+}
+
+.custom-chart-infobar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 6px 12px;
+    background: rgba(15, 23, 42, 0.7);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+    font-size: 11px;
+    color: #94a3b8;
+    overflow-x: auto;
+    white-space: nowrap;
+    gap: 8px;
+}
+
+.cc-info-sym {
+    color: #38bdf8;
+    font-weight: 700;
+}
+
+.cc-info-val {
+    display: inline-flex;
+    gap: 8px;
+    font-family: var(--font-mono, monospace);
+    font-size: 11px;
+}
+
+.custom-chart-canvas-box {
+    flex: 1;
+    min-height: 400px;
+    position: relative;
+    cursor: crosshair;
+    background: #0b0f19;
+}
+
+#custom-candle-canvas {
+    display: block;
+    width: 100%;
+    height: 100%;
+}
+
+.custom-chart-legend {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 6px 12px;
+    background: rgba(15, 23, 42, 0.5);
+    border-top: 1px solid rgba(255, 255, 255, 0.05);
+    font-size: 10.5px;
+    color: #64748b;
+    flex-wrap: wrap;
+}
+
+.c-leg-item {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+}
+
+.c-leg-line {
+    display: inline-block;
+    width: 14px;
+    height: 2px;
+}
+
+.c-leg-line.green-dash {
+    border-top: 2px dashed #10b981;
+}
+
+.c-leg-line.red-dash {
+    border-top: 2px dashed #ef4444;
+}
+
+.c-leg-line.cyan-solid {
+    background: #38bdf8;
+}
+
+.c-leg-box.purple-box {
+    display: inline-block;
+    width: 12px;
+    height: 8px;
+    background: rgba(139, 92, 246, 0.3);
+    border: 1px dashed rgba(139, 92, 246, 0.6);
+    border-radius: 2px;
+}
+
+.c-leg-hint {
+    margin-left: auto;
+    font-size: 10px;
+    color: #475569;
+}
+
+
