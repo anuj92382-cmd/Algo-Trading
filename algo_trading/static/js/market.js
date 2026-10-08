@@ -500,10 +500,13 @@ function drawCustomChart() {
     // Determine min & max price
     let minPrice = Infinity;
     let maxPrice = -Infinity;
-    let maxVol = 0;
-
+    let maxVol   = 0;
     visibleData.forEach(c => {
         if (c.low < minPrice) minPrice = c.low;
+        if (c.high > maxPrice) maxPrice = c.high;
+        if (c.volume > maxVol) maxVol = c.volume;
+    });
+
     const ltp = _selectedStock ? _selectedStock.ltp : 0;
 
     if (ltp > 0) {
