@@ -87,6 +87,7 @@ function showPage(name) {
     if (name === 'sectors')   loadHeatmap();
     if (name === 'reversals') initReversalsPage();
     if (name === 'trade')     initTradePage();
+    if (name === 'stocks')    initStocksPage();
 }
 
 function toggleSidebar() {

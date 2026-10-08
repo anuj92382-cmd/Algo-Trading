@@ -4222,3 +4222,433 @@ table tbody td a:hover {
         flex-wrap: wrap;
     }
 }
+
+/* ═══════════════════════════════════════════════════════════════
+   ALL STOCKS & BASE CANDLE BREAKOUT SCREENER + RIGHT-SIDE CHART
+═══════════════════════════════════════════════════════════════ */
+.screener-pill-group {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    align-items: center;
+    margin: 8px 0 12px 0;
+}
+
+.sc-pill {
+    background: var(--card-bg, #1a1e29);
+    color: var(--text2, #94a3b8);
+    border: 1px solid var(--border, rgba(255,255,255,0.08));
+    border-radius: 20px;
+    padding: 6px 14px;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    transition: all 0.2s ease;
+}
+
+.sc-pill:hover {
+    background: var(--card-hover, #242a38);
+    color: #fff;
+    border-color: rgba(255,255,255,0.2);
+}
+
+.sc-pill.active {
+    background: #3b82f6;
+    color: #ffffff;
+    border-color: #60a5fa;
+    box-shadow: 0 2px 10px rgba(59,130,246,0.35);
+}
+
+.sc-pill.bull.active {
+    background: #10b981;
+    color: #ffffff;
+    border-color: #34d399;
+    box-shadow: 0 2px 10px rgba(16,185,129,0.35);
+}
+
+.sc-pill.bull-soft.active {
+    background: #0ea5e9;
+    color: #ffffff;
+    border-color: #38bdf8;
+    box-shadow: 0 2px 10px rgba(14,165,233,0.35);
+}
+
+.sc-pill.bear.active {
+    background: #ef4444;
+    color: #ffffff;
+    border-color: #f87171;
+    box-shadow: 0 2px 10px rgba(239,68,68,0.35);
+}
+
+.sc-pill.bear-soft.active {
+    background: #f59e0b;
+    color: #ffffff;
+    border-color: #fbbf24;
+    box-shadow: 0 2px 10px rgba(245,158,11,0.35);
+}
+
+.sc-pill.base.active {
+    background: #8b5cf6;
+    color: #ffffff;
+    border-color: #a78bfa;
+    box-shadow: 0 2px 10px rgba(139,92,246,0.35);
+}
+
+.sc-pill.all.active {
+    background: #64748b;
+    color: #ffffff;
+    border-color: #94a3b8;
+}
+
+.pill-cnt {
+    background: rgba(0,0,0,0.3);
+    padding: 2px 7px;
+    border-radius: 10px;
+    font-size: 10.5px;
+    font-weight: 700;
+}
+
+.sc-pill.active .pill-cnt {
+    background: rgba(255,255,255,0.25);
+    color: #ffffff;
+}
+
+/* ── Split Workspace ── */
+.stocks-split-workspace {
+    display: grid;
+    grid-template-columns: minmax(0, 1.25fr) minmax(360px, 0.95fr);
+    gap: 16px;
+    align-items: start;
+    margin-top: 14px;
+}
+
+@media (max-width: 1100px) {
+    .stocks-split-workspace {
+        grid-template-columns: 1fr;
+    }
+}
+
+.stocks-table-panel {
+    margin: 0;
+    min-height: 640px;
+}
+
+.stocks-table-wrap {
+    max-height: 680px;
+    overflow-y: auto;
+}
+
+.screener-interactive-table tbody tr {
+    cursor: pointer;
+    transition: background 0.15s ease;
+}
+
+.screener-interactive-table tbody tr:hover {
+    background: rgba(59,130,246,0.1) !important;
+}
+
+.screener-interactive-table tbody tr.selected-row {
+    background: rgba(59,130,246,0.18) !important;
+    border-left: 3px solid #3b82f6;
+}
+
+/* ── Status Badges ── */
+.sc-badge-status {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 3px 8px;
+    border-radius: 6px;
+    font-size: 11px;
+    font-weight: 700;
+    white-space: nowrap;
+}
+
+.badge-high-break {
+    background: rgba(16,185,129,0.15);
+    color: #34d399;
+    border: 1px solid rgba(16,185,129,0.35);
+}
+
+.badge-near-high {
+    background: rgba(14,165,233,0.15);
+    color: #38bdf8;
+    border: 1px solid rgba(14,165,233,0.35);
+}
+
+.badge-low-break {
+    background: rgba(239,68,68,0.15);
+    color: #f87171;
+    border: 1px solid rgba(239,68,68,0.35);
+}
+
+.badge-near-low {
+    background: rgba(245,158,11,0.15);
+    color: #fbbf24;
+    border: 1px solid rgba(245,158,11,0.35);
+}
+
+.badge-inside-base {
+    background: rgba(139,92,246,0.12);
+    color: #c084fc;
+    border: 1px solid rgba(139,92,246,0.25);
+}
+
+.badge-normal {
+    background: rgba(100,116,139,0.12);
+    color: #94a3b8;
+    border: 1px solid rgba(100,116,139,0.2);
+}
+
+/* ── Base Candle Ratio Pill ── */
+.sc-body-pill {
+    display: inline-block;
+    padding: 2px 7px;
+    border-radius: 4px;
+    font-size: 10.5px;
+    font-weight: 600;
+    font-family: var(--font-mono, monospace);
+}
+
+.sc-body-pill.doji {
+    background: rgba(168,85,247,0.18);
+    color: #d8b4fe;
+    border: 1px solid rgba(168,85,247,0.35);
+}
+
+.sc-body-pill.tight {
+    background: rgba(6,182,212,0.15);
+    color: #67e8f9;
+    border: 1px solid rgba(6,182,212,0.3);
+}
+
+.sc-body-pill.standard {
+    background: rgba(59,130,246,0.15);
+    color: #93c5fd;
+    border: 1px solid rgba(59,130,246,0.25);
+}
+
+.sc-body-pill.expansion {
+    background: rgba(100,116,139,0.15);
+    color: #cbd5e1;
+    border: 1px solid rgba(100,116,139,0.2);
+}
+
+.fno-tag {
+    background: rgba(245,158,11,0.15);
+    color: #fbbf24;
+    border: 1px solid rgba(245,158,11,0.3);
+    font-size: 9px;
+    font-weight: 700;
+    padding: 1px 4px;
+    border-radius: 3px;
+}
+
+.btn-chart-action {
+    background: rgba(59,130,246,0.15);
+    color: #60a5fa;
+    border: 1px solid rgba(59,130,246,0.3);
+    border-radius: 4px;
+    padding: 3px 6px;
+    cursor: pointer;
+}
+
+.btn-chart-action:hover {
+    background: #3b82f6;
+    color: #fff;
+}
+
+/* ── Right-Side Live Chart Panel ── */
+.stocks-chart-panel {
+    margin: 0;
+    display: flex;
+    flex-direction: column;
+    height: 720px;
+    position: sticky;
+    top: 20px;
+    box-shadow: 0 8px 30px rgba(0,0,0,0.35);
+    border: 1px solid var(--border, rgba(255,255,255,0.1));
+}
+
+.stocks-chart-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 12px 14px;
+    border-bottom: 1px solid var(--border, rgba(255,255,255,0.08));
+    background: rgba(15,23,42,0.6);
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.chart-header-left {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.chart-sym-title {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.chart-sym-badge {
+    background: #3b82f6;
+    color: #fff;
+    padding: 3px 8px;
+    border-radius: 5px;
+    font-size: 13px;
+    font-weight: 800;
+    letter-spacing: 0.5px;
+}
+
+.chart-sym-name {
+    color: var(--text2, #94a3b8);
+    font-size: 12px;
+    max-width: 140px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.chart-sym-price {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.chart-ltp {
+    font-size: 15px;
+    font-weight: 800;
+    color: #fff;
+}
+
+.chart-chg {
+    font-size: 12.5px;
+    font-weight: 700;
+}
+
+.chart-header-right {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.chart-tf-group {
+    display: flex;
+    background: rgba(0,0,0,0.3);
+    border: 1px solid var(--border, rgba(255,255,255,0.1));
+    border-radius: 6px;
+    padding: 2px;
+    gap: 2px;
+}
+
+.chart-tf-btn {
+    background: transparent;
+    border: none;
+    color: var(--text3, #64748b);
+    padding: 3px 8px;
+    font-size: 11px;
+    font-weight: 700;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+}
+
+.chart-tf-btn:hover {
+    color: #fff;
+}
+
+.chart-tf-btn.active {
+    background: #3b82f6;
+    color: #ffffff;
+}
+
+.chart-link-btn {
+    background: rgba(255,255,255,0.06);
+    color: var(--text2, #94a3b8);
+    border: 1px solid rgba(255,255,255,0.12);
+    border-radius: 5px;
+    padding: 3px 8px;
+    font-size: 11px;
+    font-weight: 700;
+    text-decoration: none;
+    transition: all 0.2s ease;
+}
+
+.chart-link-btn:hover {
+    background: rgba(255,255,255,0.15);
+    color: #fff;
+}
+
+/* ── Levels Strip ── */
+.chart-levels-strip {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(80px, 1fr));
+    gap: 6px;
+    padding: 8px 12px;
+    background: rgba(0,0,0,0.25);
+    border-bottom: 1px solid var(--border, rgba(255,255,255,0.06));
+    font-size: 11px;
+}
+
+.lvl-item {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+}
+
+.lvl-lbl {
+    font-size: 9.5px;
+    color: var(--text3, #64748b);
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+}
+
+.lvl-val {
+    font-weight: 700;
+    font-family: var(--font-mono, monospace);
+    color: #fff;
+}
+
+/* ── Live Chart Embed ── */
+.stocks-chart-embed {
+    flex: 1;
+    min-height: 480px;
+    position: relative;
+    background: #131722;
+}
+
+.chart-placeholder {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    color: var(--text3, #64748b);
+    text-align: center;
+    padding: 24px;
+}
+
+.chart-placeholder-icon {
+    font-size: 40px;
+    margin-bottom: 10px;
+    opacity: 0.5;
+}
+
+/* ── Chart Action Bar ── */
+.chart-action-bar {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 8px;
+    padding: 10px 14px;
+    border-top: 1px solid var(--border, rgba(255,255,255,0.08));
+    background: rgba(15,23,42,0.4);
+}
+

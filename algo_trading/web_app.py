@@ -8,6 +8,7 @@ import json
 import logging
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, date, timedelta
 from pathlib import Path
 
@@ -1247,201 +1248,344 @@ def api_gainers_losers():
         return jsonify({"error": str(e), "gainers": [], "losers": []})
 
 
-@app.route("/api/market/stocks")
-def api_market_stocks():
-    """
-    NSE stocks screener.
-    Agar live quotes nahi milti toh sirf instruments list show karo (no prices).
-    Search: symbol ya company name se dhundho.
-    """
-    if not _state["kite"]:
-        return jsonify({"error": "Not logged in", "stocks": [], "total": 0})
-
-    min_price  = float(request.args.get("min",    50))
-    max_price  = float(request.args.get("max", 20000))
-    sort_by    = request.args.get("sort", "chg_desc")
-    search_q   = request.args.get("q", "").upper().strip()
-
-    try:
-        kite        = _state["kite"]
-        instruments = kite.instruments("NSE")
-
-        eq_stocks = [
-            inst for inst in instruments
-            if inst.get("instrument_type") == "EQ"
-            and inst.get("segment") == "NSE"
-        ]
-
-        # Search filter pehle lagao (instruments pe, price se pehle)
-        if search_q:
-            eq_stocks = [
-                s for s in eq_stocks
-                if search_q in s.get("tradingsymbol", "").upper()
-                or search_q in s.get("name", "").upper()
-            ]
-
-        # Live quotes try karo
-        all_results = []
-        has_live_data = True
-
-        try:
-            # Batch mein fetch karo (max 500 per request)
-            batch_size = 500
-            stocks_to_fetch = eq_stocks[:3000]  # Max 3000 stocks
-
-            for i in range(0, len(stocks_to_fetch), batch_size):
-                batch   = stocks_to_fetch[i : i + batch_size]
-                symbols = [f"NSE:{s['tradingsymbol']}" for s in batch]
-                name_map = {s["tradingsymbol"]: s.get("name", "") for s in batch}
-
-                try:
-                    ohlc_data = kite.ohlc(symbols)
-                    
-                    # Try to fetch volume separately for first few stocks (quota limit)
-                    # Note: quote() API has strict rate limits, so only fetch for visible stocks
-                    volume_data = {}
-                    if i == 0:  # Only first batch
-                        try:
-                            # Fetch volume for first 100 stocks only (API limit)
-                            sample_symbols = symbols[:100]
-                            quotes = kite.quote(sample_symbols)
-                            for sym, quote_info in quotes.items():
-                                clean_sym = sym.replace("NSE:", "")
-                                volume_data[clean_sym] = (
-                                    quote_info.get("volume", 0) or
-                                    quote_info.get("volume_traded", 0) or
-                                    quote_info.get("day_volume", 0) or
-                                    0
-                                )
-                        except Exception as vol_err:
-                            logger.debug(f"Volume fetch skipped: {vol_err}")
-                            
-                except Exception as batch_err:
-                    logger.warning(f"Batch {i} OHLC failed: {batch_err}")
-                    has_live_data = False
-                    break
-
-                for key, data in ohlc_data.items():
-                    symbol     = key.replace("NSE:", "")
-                    ltp        = data.get("last_price", 0)
-                    prev_close = data.get("ohlc", {}).get("close", 0)
-                    
-                    # Get volume from separate fetch if available
-                    volume = volume_data.get(symbol, 0)
-
-                    # Price filter (search mode mein relax karo)
-                    if not search_q:
-                        if ltp < min_price or ltp > max_price:
-                            continue
-
-                    if prev_close > 0 and ltp > 0:
-                        change     = ltp - prev_close
-                        change_pct = (change / prev_close) * 100
-                    else:
-                        change = change_pct = 0
-
-                    all_results.append({
-                        "symbol":     symbol,
-                        "name":       name_map.get(symbol, ""),
-                        "ltp":        round(ltp, 2),
-                        "prev_close": round(prev_close, 2),
-                        "open":       round(data.get("ohlc", {}).get("open", 0), 2),
-                        "high":       round(data.get("ohlc", {}).get("high", 0), 2),
-                        "low":        round(data.get("ohlc", {}).get("low",  0), 2),
-                        "change":     round(change, 2),
-                        "change_pct": round(change_pct, 2),
-                        "volume":     volume,
-                        "has_price":  ltp > 0,
-                    })
-
-        except Exception as e:
-            has_live_data = False
-            logger.warning(f"Live quotes unavailable: {e}")
-
-        # Agar live data nahi mila - instruments se basic list banao
-        if not has_live_data or not all_results:
-            logger.info("Falling back to instruments list (no live prices)")
-            for s in eq_stocks[:1000]:
-                all_results.append({
-                    "symbol":     s.get("tradingsymbol", ""),
-                    "name":       s.get("name", ""),
-                    "ltp":        0,
-                    "prev_close": 0,
-                    "open":       0,
-                    "high":       0,
-                    "low":        0,
-                    "change":     0,
-                    "change_pct": 0,
-                    "volume":     0,
-                    "has_price":  False,
-                })
-
-        # Sort
-        sort_map = {
-            "chg_desc":    lambda x: -x["change_pct"],
-            "chg_asc":     lambda x:  x["change_pct"],
-            "price_asc":   lambda x:  x["ltp"],
-            "price_desc":  lambda x: -x["ltp"],
-            "volume_desc": lambda x: -x["volume"],
-            "name_asc":    lambda x:  x["symbol"],
-        }
-        all_results.sort(key=sort_map.get(sort_by, sort_map["chg_desc"]))
-
-        logger.info(f"Stocks: {len(all_results)} | search='{search_q}' | live={has_live_data}")
-        return jsonify({
-            "stocks":        all_results,
-            "total":         len(all_results),
-            "has_live_data": has_live_data,
-        })
-
-    except Exception as e:
-        logger.error(f"Stocks error: {e}")
-        return jsonify({"error": str(e), "stocks": [], "total": 0})
-
-
 _prev_day_cache: dict = {}
 _prev_day_cache_date: str = ""
 
 def _get_symbol_prev_day(symbol: str, kite, token_map: dict = None) -> dict:
-    """Ek symbol ke previous day high, low, close return karo."""
+    """Ek symbol ke previous day high, low, close, open return karo."""
+    res = _get_symbols_prev_day_batch([symbol], kite, token_map)
+    return res.get(symbol, {})
+
+
+def _get_symbols_prev_day_batch(symbols: list, kite, token_map: dict = None) -> dict:
+    """Batch fetch previous day OHLC with fast multi-threading and daily caching."""
     global _prev_day_cache, _prev_day_cache_date
     today_str = str(date.today())
     if _prev_day_cache_date != today_str:
         _prev_day_cache.clear()
         _prev_day_cache_date = today_str
 
-    if symbol in _prev_day_cache:
-        return _prev_day_cache[symbol]
+    needed = [s for s in symbols if s not in _prev_day_cache]
+    if needed and kite and token_map:
+        to_d = datetime.now(IST_tz)
+        from_d = to_d - timedelta(days=6)
 
-    if not kite:
-        return {}
+        def _fetch_one(sym):
+            token = token_map.get(sym)
+            if not token:
+                return sym, {}
+            try:
+                recs = kite.historical_data(token, from_d, to_d, "day")
+                if recs and len(recs) >= 1:
+                    last_rec = recs[-1]
+                    rec_date = last_rec["date"].date() if hasattr(last_rec["date"], "date") else str(last_rec["date"])[:10]
+                    if str(rec_date) == today_str and len(recs) >= 2:
+                        prev_rec = recs[-2]
+                    else:
+                        prev_rec = last_rec
+
+                    p_high = float(prev_rec["high"])
+                    p_low = float(prev_rec["low"])
+                    p_close = float(prev_rec["close"])
+                    p_open = float(prev_rec["open"])
+                    p_range = max(0.0, p_high - p_low)
+                    p_body = abs(p_close - p_open)
+                    b_ratio = round((p_body / p_range * 100), 1) if p_range > 0 else 100.0
+
+                    return sym, {
+                        "high": p_high,
+                        "low": p_low,
+                        "close": p_close,
+                        "open": p_open,
+                        "range": round(p_range, 2),
+                        "body": round(p_body, 2),
+                        "body_ratio": b_ratio,
+                    }
+            except Exception:
+                pass
+            return sym, {}
+
+        # Parallel fetch for high speed
+        workers = min(20, max(1, len(needed)))
+        with ThreadPoolExecutor(max_workers=workers) as executor:
+            results = executor.map(_fetch_one, needed)
+            for sym, data in results:
+                if data:
+                    _prev_day_cache[sym] = data
+
+    return {s: _prev_day_cache.get(s, {}) for s in symbols}
+
+
+@app.route("/api/market/stocks")
+def api_market_stocks():
+    """
+    Enhanced All Stocks & Base Candle Breakout Screener API.
+    Identifies previous day base candles and live high/low breakouts / approaching breakouts.
+    """
+    if not _state["kite"]:
+        return jsonify({"error": "Not logged in", "stocks": [], "total": 0})
+
+    universe       = request.args.get("universe", "fno").lower().strip()
+    status_filter  = request.args.get("status_filter", "all_triggers").lower().strip()
+    base_only      = request.args.get("base_only", "true").lower() == "true"
+    max_body_pct   = float(request.args.get("max_body", 50.0))
+    near_pct       = float(request.args.get("near_pct", 0.6))
+    min_price      = float(request.args.get("min", 50))
+    max_price      = float(request.args.get("max", 20000))
+    sort_by        = request.args.get("sort", "status_desc")
+    search_q       = request.args.get("q", "").upper().strip()
 
     try:
-        token = token_map.get(symbol) if token_map else None
-        if token:
-            to_d = datetime.now(IST_tz)
-            from_d = to_d - timedelta(days=5)
-            recs = kite.historical_data(token, from_d, to_d, "day")
-            if recs and len(recs) >= 1:
-                last_rec = recs[-1]
-                rec_date = last_rec["date"].date() if hasattr(last_rec["date"], "date") else str(last_rec["date"])[:10]
-                if str(rec_date) == today_str and len(recs) >= 2:
-                    prev_rec = recs[-2]
-                else:
-                    prev_rec = last_rec
+        kite        = _state["kite"]
+        instruments = kite.instruments("NSE")
 
-                res = {
-                    "high": float(prev_rec["high"]),
-                    "low": float(prev_rec["low"]),
-                    "close": float(prev_rec["close"]),
-                    "open": float(prev_rec["open"]),
-                }
-                _prev_day_cache[symbol] = res
-                return res
-    except Exception:
-        pass
+        token_map = {
+            inst["tradingsymbol"]: inst["instrument_token"]
+            for inst in instruments
+            if inst.get("segment") == "NSE" and inst.get("instrument_type") == "EQ"
+        }
+        name_map = {
+            inst["tradingsymbol"]: inst.get("name", "")
+            for inst in instruments
+            if inst.get("segment") == "NSE" and inst.get("instrument_type") == "EQ"
+        }
 
-    return {}
+        # Resolve universe
+        fno_set = _get_fno_symbols(kite)
+        if universe == "fno":
+            target_symbols = sorted(list(fno_set))
+        elif universe == "all_stocks" or universe == "all_nse":
+            target_symbols = [
+                inst["tradingsymbol"] for inst in instruments
+                if inst.get("segment") == "NSE" and inst.get("instrument_type") == "EQ"
+            ]
+        elif universe in ("nifty50", "nifty100", "nifty500", "watchlist"):
+            target_symbols = _resolve_symbols(universe)
+        else:
+            target_symbols = sorted(list(fno_set))
+
+        # Filter by search term before query
+        if search_q:
+            target_symbols = [
+                s for s in target_symbols
+                if search_q in s.upper() or search_q in name_map.get(s, "").upper()
+            ]
+
+        # Fetch today's OHLC in batches
+        all_results = []
+        has_live_data = True
+        batch_size = 500
+        stocks_to_fetch = target_symbols[:2500]
+
+        ohlc_all = {}
+        for i in range(0, len(stocks_to_fetch), batch_size):
+            batch = stocks_to_fetch[i : i + batch_size]
+            syms_req = [f"NSE:{s}" for s in batch]
+            try:
+                batch_ohlc = kite.ohlc(syms_req)
+                ohlc_all.update(batch_ohlc)
+            except Exception as batch_err:
+                logger.warning(f"Screener OHLC batch {i} failed: {batch_err}")
+                has_live_data = False
+                break
+
+        # Candidate symbols within price bounds
+        candidate_syms = []
+        for key, data in ohlc_all.items():
+            sym = key.replace("NSE:", "")
+            ltp = data.get("last_price", 0)
+            if ltp > 0:
+                if not search_q and (ltp < min_price or ltp > max_price):
+                    continue
+                candidate_syms.append(sym)
+
+        # Batch fetch previous day OHLC for candidates
+        prev_data_map = _get_symbols_prev_day_batch(candidate_syms, kite, token_map)
+
+        summary_counts = {
+            "total_scanned": len(candidate_syms),
+            "base_candles_count": 0,
+            "high_breakouts_count": 0,
+            "near_high_count": 0,
+            "low_breakdown_count": 0,
+            "near_low_count": 0,
+            "all_triggers_count": 0,
+            "all_stocks_count": len(candidate_syms),
+        }
+
+        for sym in candidate_syms:
+            data = ohlc_all.get(f"NSE:{sym}", {})
+            ltp = data.get("last_price", 0)
+            ohlc_d = data.get("ohlc", {})
+            open_p = ohlc_d.get("open", 0)
+            high_p = ohlc_d.get("high", 0)
+            low_p = ohlc_d.get("low", 0)
+            prev_close_ohlc = ohlc_d.get("close", 0)
+
+            prev_info = prev_data_map.get(sym, {})
+            prev_high = prev_info.get("high", 0.0) or prev_close_ohlc
+            prev_low = prev_info.get("low", 0.0) or prev_close_ohlc
+            prev_close = prev_info.get("close", 0.0) or prev_close_ohlc
+            prev_open = prev_info.get("open", 0.0) or prev_close
+
+            prev_range = max(0.0, prev_high - prev_low)
+            prev_body = abs(prev_close - prev_open)
+            body_ratio_pct = round((prev_body / prev_range * 100), 1) if prev_range > 0 else 100.0
+
+            # Base Candle check (Body <= max_body_pct of Range)
+            is_base = bool(prev_range > 0 and body_ratio_pct <= max_body_pct)
+            if is_base:
+                summary_counts["base_candles_count"] += 1
+
+            if body_ratio_pct <= 20.0:
+                base_type = "Doji Base"
+            elif body_ratio_pct <= 35.0:
+                base_type = "Tight Base"
+            elif body_ratio_pct <= 50.0:
+                base_type = "Base Candle"
+            else:
+                base_type = "Expansion"
+
+            # Change %
+            if prev_close > 0 and ltp > 0:
+                change = ltp - prev_close
+                change_pct = (change / prev_close) * 100.0
+            else:
+                change = change_pct = 0.0
+
+            # ── Breakout & Approaching Evaluation ──
+            status = "INSIDE_BASE" if is_base else "NORMAL"
+            status_label = "📦 Inside Base" if is_base else "Normal"
+            break_level = prev_high
+            distance_pct = 0.0
+            trigger_score = 0  # For sorting priority
+
+            # 1. High Breakout (LTP or High crossed PDH)
+            if prev_high > 0 and (ltp >= prev_high or high_p >= prev_high):
+                status = "HIGH_BREAKOUT"
+                status_label = "🔥 High Breakout"
+                break_level = prev_high
+                distance_pct = round((ltp - prev_high) / prev_high * 100.0, 2)
+                trigger_score = 100
+                if is_base:
+                    summary_counts["high_breakouts_count"] += 1
+                    summary_counts["all_triggers_count"] += 1
+
+            # 2. Near High Break (LTP below PDH and within near_pct)
+            elif prev_high > 0 and ltp < prev_high:
+                dist_to_high = round((prev_high - ltp) / prev_high * 100.0, 2)
+                if dist_to_high <= near_pct:
+                    status = "NEAR_HIGH"
+                    status_label = "⚡ Near High Break"
+                    break_level = prev_high
+                    distance_pct = -dist_to_high
+                    trigger_score = 80 - dist_to_high
+                    if is_base:
+                        summary_counts["near_high_count"] += 1
+                        summary_counts["all_triggers_count"] += 1
+
+            # 3. Low Breakdown (LTP or Low crossed PDL)
+            elif prev_low > 0 and (ltp <= prev_low or low_p <= prev_low):
+                status = "LOW_BREAKDOWN"
+                status_label = "🔻 Low Breakdown"
+                break_level = prev_low
+                distance_pct = round((prev_low - ltp) / prev_low * 100.0, 2)
+                trigger_score = 90
+                if is_base:
+                    summary_counts["low_breakdown_count"] += 1
+                    summary_counts["all_triggers_count"] += 1
+
+            # 4. Near Low Break (LTP above PDL and within near_pct)
+            elif prev_low > 0 and ltp > prev_low:
+                dist_to_low = round((ltp - prev_low) / prev_low * 100.0, 2)
+                if dist_to_low <= near_pct:
+                    status = "NEAR_LOW"
+                    status_label = "⚠️ Near Low Break"
+                    break_level = prev_low
+                    distance_pct = -dist_to_low
+                    trigger_score = 70 - dist_to_low
+                    if is_base:
+                        summary_counts["near_low_count"] += 1
+                        summary_counts["all_triggers_count"] += 1
+
+            item = {
+                "symbol": sym,
+                "name": name_map.get(sym, sym),
+                "ltp": round(ltp, 2),
+                "open": round(open_p, 2),
+                "high": round(high_p, 2),
+                "low": round(low_p, 2),
+                "prev_close": round(prev_close, 2),
+                "prev_high": round(prev_high, 2),
+                "prev_low": round(prev_low, 2),
+                "prev_open": round(prev_open, 2),
+                "prev_body": round(prev_body, 2),
+                "prev_range": round(prev_range, 2),
+                "body_ratio_pct": body_ratio_pct,
+                "is_base_candle": is_base,
+                "base_type": base_type,
+                "status": status,
+                "status_label": status_label,
+                "break_level": round(break_level, 2),
+                "distance_pct": distance_pct,
+                "change": round(change, 2),
+                "change_pct": round(change_pct, 2),
+                "is_fno": bool(sym in fno_set),
+                "trigger_score": trigger_score,
+            }
+
+            # Filter checks
+            # 1. Base only filter
+            if base_only and not is_base and status_filter not in ("all", "all_stocks"):
+                continue
+
+            # 2. Status filter
+            if status_filter == "all_triggers":
+                if status not in ("HIGH_BREAKOUT", "NEAR_HIGH", "LOW_BREAKDOWN", "NEAR_LOW"):
+                    continue
+            elif status_filter == "high_break":
+                if status != "HIGH_BREAKOUT":
+                    continue
+            elif status_filter == "near_high":
+                if status != "NEAR_HIGH":
+                    continue
+            elif status_filter == "low_break":
+                if status != "LOW_BREAKDOWN":
+                    continue
+            elif status_filter == "near_low":
+                if status != "NEAR_LOW":
+                    continue
+            elif status_filter == "all_base":
+                if not is_base:
+                    continue
+            # "all" passes everything
+
+            all_results.append(item)
+
+        # Sorting
+        sort_map = {
+            "status_desc": lambda x: (-x["trigger_score"], -abs(x["change_pct"])),
+            "chg_desc":    lambda x: -x["change_pct"],
+            "chg_asc":     lambda x:  x["change_pct"],
+            "body_asc":    lambda x:  x["body_ratio_pct"],
+            "price_desc":  lambda x: -x["ltp"],
+            "price_asc":   lambda x:  x["ltp"],
+            "name_asc":    lambda x:  x["symbol"],
+        }
+        all_results.sort(key=sort_map.get(sort_by, sort_map["status_desc"]))
+
+        logger.info(f"Base Candle Screener: {len(all_results)} matches out of {len(candidate_syms)} scanned | universe={universe}")
+        return jsonify({
+            "stocks":        all_results,
+            "total":         len(all_results),
+            "summary":       summary_counts,
+            "universe":      universe,
+            "has_live_data": has_live_data,
+        })
+
+    except Exception as e:
+        logger.error(f"Stocks Screener Error: {e}")
+        return jsonify({"error": str(e), "stocks": [], "total": 0})
 
 
 NSE_FNO_SYMBOLS = {

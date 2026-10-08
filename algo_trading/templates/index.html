@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Algo Trading Dashboard</title>
-    <link rel="stylesheet" href="/static/css/style.css?v=6">
+    <link rel="stylesheet" href="/static/css/style.css?v=7">
     <style>
         .wl-del-btn {
             background: transparent;
@@ -823,69 +823,189 @@
         <!-- ══ PAGE: ALL STOCKS ═════════════════════════════════ -->
         <section id="page-stocks" class="page">
             <div class="page-header">
-                <h2>📋 All Stocks Screener</h2>
-                <div class="page-actions">
-                    <span class="info-pill" id="stocks-range-info">Price: ₹50 - ₹20,000</span>
-                    <button class="btn btn-blue" onclick="loadStocks()">🔄 Load</button>
+                <div>
+                    <h2>📋 All Stocks Screener</h2>
+                    <p style="color:var(--text3);font-size:12px;margin:2px 0 0 0">
+                        Previous Day Base Candle (Contraction/Consolidation) • Live High/Low Breakouts & Near-Breakout Tracking
+                    </p>
+                </div>
+                <div class="page-actions" style="display:flex;align-items:center;gap:8px">
+                    <span class="info-pill" id="stocks-range-info">Universe: F&O (185)</span>
+                    <button class="btn btn-blue" id="stocks-scan-btn" onclick="loadStocks()">⚡ Scan Now</button>
+                    <label style="display:flex;align-items:center;gap:4px;font-size:11px;color:var(--text2);cursor:pointer;margin-left:4px" title="Auto refresh every 10 seconds">
+                        <input type="checkbox" id="stocks-auto-refresh" onchange="toggleStocksAutoRefresh()"> Auto
+                    </label>
                 </div>
             </div>
 
-            <!-- Filters -->
-            <div class="filter-bar">
+            <!-- Quick Filter Tabs / Badges Bar -->
+            <div class="screener-pill-group" id="stocks-filter-pills">
+                <button class="sc-pill active" onclick="setStocksFilter('all_triggers', this)">
+                    ⚡ All Breakouts & Near <span class="pill-cnt" id="cnt-all-triggers">0</span>
+                </button>
+                <button class="sc-pill bull" onclick="setStocksFilter('high_break', this)">
+                    🔥 High Breakout <span class="pill-cnt" id="cnt-high-break">0</span>
+                </button>
+                <button class="sc-pill bull-soft" onclick="setStocksFilter('near_high', this)">
+                    ⚡ Near High Break <span class="pill-cnt" id="cnt-near-high">0</span>
+                </button>
+                <button class="sc-pill bear" onclick="setStocksFilter('low_break', this)">
+                    🔻 Low Breakdown <span class="pill-cnt" id="cnt-low-break">0</span>
+                </button>
+                <button class="sc-pill bear-soft" onclick="setStocksFilter('near_low', this)">
+                    ⚠️ Near Low Break <span class="pill-cnt" id="cnt-near-low">0</span>
+                </button>
+                <button class="sc-pill base" onclick="setStocksFilter('all_base', this)">
+                    📦 All Base Candles <span class="pill-cnt" id="cnt-all-base">0</span>
+                </button>
+                <button class="sc-pill all" onclick="setStocksFilter('all', this)">
+                    🌐 All Stocks <span class="pill-cnt" id="cnt-all-stocks">0</span>
+                </button>
+            </div>
+
+            <!-- Filter Controls Bar -->
+            <div class="filter-bar" style="margin-top:10px;flex-wrap:wrap">
                 <div class="filter-group">
-                    <label>Min Price ₹</label>
-                    <input type="number" id="f-min" value="50" min="1" max="19999">
-                </div>
-                <div class="filter-group">
-                    <label>Max Price ₹</label>
-                    <input type="number" id="f-max" value="20000" min="51">
-                </div>
-                <div class="filter-group">
-                    <label>Sort By</label>
-                    <select id="f-sort">
-                        <option value="chg_desc">% Change ↓</option>
-                        <option value="chg_asc">% Change ↑</option>
-                        <option value="price_asc">Price ↑</option>
-                        <option value="price_desc">Price ↓</option>
-                        <option value="volume_desc">Volume ↓</option>
+                    <label>Universe</label>
+                    <select id="f-universe" onchange="loadStocks()">
+                        <option value="fno" selected>🔥 F&O Stocks (~185 - Fast)</option>
+                        <option value="nifty50">Nifty 50</option>
+                        <option value="nifty100">Nifty 100</option>
+                        <option value="nifty500">Nifty 500</option>
+                        <option value="all_stocks">🌐 All NSE Stocks (~1,800+)</option>
+                        <option value="watchlist">⭐ My Watchlist</option>
                     </select>
                 </div>
                 <div class="filter-group">
-                    <label>Search</label>
-                    <input type="text" id="f-search" placeholder="Symbol ya name... (Enter dabao)" 
+                    <label>Max Base Body %</label>
+                    <select id="f-max-body" onchange="loadStocks()">
+                        <option value="50" selected>≤ 50% (Standard Base)</option>
+                        <option value="40">≤ 40% (Tight Base)</option>
+                        <option value="30">≤ 30% (Very Tight)</option>
+                        <option value="20">≤ 20% (Doji Base)</option>
+                        <option value="70">≤ 70% (Relaxed)</option>
+                    </select>
+                </div>
+                <div class="filter-group">
+                    <label>Near Threshold</label>
+                    <select id="f-near-pct" onchange="loadStocks()">
+                        <option value="0.6" selected>Within 0.60% (Hot)</option>
+                        <option value="0.4">Within 0.40% (Very Close)</option>
+                        <option value="0.8">Within 0.80% (Early Alert)</option>
+                        <option value="1.2">Within 1.20% (Wide)</option>
+                    </select>
+                </div>
+                <div class="filter-group">
+                    <label>Min Price ₹</label>
+                    <input type="number" id="f-min" value="50" min="1" max="19999" onchange="loadStocks()">
+                </div>
+                <div class="filter-group">
+                    <label>Max Price ₹</label>
+                    <input type="number" id="f-max" value="20000" min="51" onchange="loadStocks()">
+                </div>
+                <div class="filter-group">
+                    <label>Sort By</label>
+                    <select id="f-sort" onchange="loadStocks()">
+                        <option value="status_desc">⚡ Priority / Triggers</option>
+                        <option value="chg_desc">% Change ↓</option>
+                        <option value="chg_asc">% Change ↑</option>
+                        <option value="body_asc">Base Body % (Tightest) ↑</option>
+                        <option value="price_desc">Price ↓</option>
+                        <option value="price_asc">Price ↑</option>
+                    </select>
+                </div>
+                <div class="filter-group" style="flex:1;min-width:180px">
+                    <label>Search Symbol / Company</label>
+                    <input type="text" id="f-search" placeholder="e.g. RELIANCE, TATA, INFY..." 
                            oninput="filterStocksTable()"
                            onkeydown="if(event.key==='Enter') loadStocks()">
                 </div>
-                <button class="btn btn-green" onclick="loadStocks()">🔍 Search / Apply</button>
+                <button class="btn btn-green" onclick="loadStocks()" style="align-self:flex-end">🔍 Apply</button>
             </div>
 
-            <div class="panel">
-                <div class="panel-header">
-                    <h3>NSE Stocks</h3>
-                    <span class="badge blue" id="stocks-total">0 stocks</span>
+            <!-- Screener Split Workspace (Left Table + Right Interactive Chart) -->
+            <div class="stocks-split-workspace">
+                <!-- Left: Screener Table -->
+                <div class="stocks-table-panel panel">
+                    <div class="panel-header">
+                        <div style="display:flex;align-items:center;gap:8px">
+                            <h3 id="stocks-table-title">Breakout & Base Candidates</h3>
+                            <span class="badge blue" id="stocks-total">0 stocks</span>
+                        </div>
+                        <span style="color:var(--text3);font-size:11px">💡 Click any row to view live chart</span>
+                    </div>
+                    <div class="table-wrap tall stocks-table-wrap">
+                        <table id="stocks-table" class="screener-interactive-table">
+                            <thead><tr>
+                                <th>#</th>
+                                <th>Symbol</th>
+                                <th>Trigger Status</th>
+                                <th>LTP ₹</th>
+                                <th>Change %</th>
+                                <th>PDH (High) ₹</th>
+                                <th>PDL (Low) ₹</th>
+                                <th>Prev Base Body</th>
+                                <th>Distance %</th>
+                                <th>Action</th>
+                            </tr></thead>
+                            <tbody id="stocks-body">
+                                <tr><td colspan="10" class="empty">
+                                    Click "⚡ Scan Now" to scan Base Candle Breakouts & Approaching stocks
+                                </td></tr>
+                            </tbody>
+                        </table>
+                    </div>
                 </div>
-                <div class="table-wrap tall">
-                    <table id="stocks-table">
-                        <thead><tr>
-                            <th>#</th>
-                            <th>Symbol</th>
-                            <th>Company</th>
-                            <th>Prev Close ₹</th>
-                            <th>LTP ₹</th>
-                            <th>Change ₹</th>
-                            <th>Change %</th>
-                            <th>Open ₹</th>
-                            <th>High ₹</th>
-                            <th>Low ₹</th>
-                            <th>Volume</th>
-                            <th>Action</th>
-                        </tr></thead>
-                        <tbody id="stocks-body">
-                            <tr><td colspan="12" class="empty">
-                                "Load" button click karo stocks dekhne ke liye
-                            </td></tr>
-                        </tbody>
-                    </table>
+
+                <!-- Right: Interactive Live Chart Panel -->
+                <div class="stocks-chart-panel panel" id="stocks-chart-panel">
+                    <div class="stocks-chart-header">
+                        <div class="chart-header-left">
+                            <div class="chart-sym-title">
+                                <span class="chart-sym-badge" id="chart-sym-badge">NSE:RELIANCE</span>
+                                <span class="chart-sym-name" id="chart-sym-name">Reliance Industries Ltd</span>
+                            </div>
+                            <div class="chart-sym-price">
+                                <span class="chart-ltp" id="chart-ltp">₹--</span>
+                                <span class="chart-chg" id="chart-chg">--%</span>
+                            </div>
+                        </div>
+                        <div class="chart-header-right">
+                            <div class="chart-tf-group">
+                                <button class="chart-tf-btn active" onclick="changeChartTimeframe('D', this)">1D</button>
+                                <button class="chart-tf-btn" onclick="changeChartTimeframe('15', this)">15m</button>
+                                <button class="chart-tf-btn" onclick="changeChartTimeframe('5', this)">5m</button>
+                                <button class="chart-tf-btn" onclick="changeChartTimeframe('1', this)">1m</button>
+                            </div>
+                            <a id="chart-external-link" href="https://in.tradingview.com/chart/?symbol=NSE:RELIANCE" target="_blank" rel="noopener noreferrer" class="chart-link-btn" title="Open full TradingView chart">
+                                ↗ TV
+                            </a>
+                        </div>
+                    </div>
+
+                    <!-- Key Trigger Reference Bar -->
+                    <div class="chart-levels-strip" id="chart-levels-strip">
+                        <div class="lvl-item"><span class="lvl-lbl">Status:</span> <span class="lvl-val" id="chart-lvl-status">--</span></div>
+                        <div class="lvl-item"><span class="lvl-lbl">PDH:</span> <span class="lvl-val green" id="chart-lvl-pdh">₹--</span></div>
+                        <div class="lvl-item"><span class="lvl-lbl">PDL:</span> <span class="lvl-val red" id="chart-lvl-pdl">₹--</span></div>
+                        <div class="lvl-item"><span class="lvl-lbl">Base Body:</span> <span class="lvl-val cyan" id="chart-lvl-body">--%</span></div>
+                        <div class="lvl-item"><span class="lvl-lbl">Distance:</span> <span class="lvl-val" id="chart-lvl-dist">--</span></div>
+                    </div>
+
+                    <!-- Live Chart Iframe Container -->
+                    <div class="stocks-chart-embed" id="stocks-chart-embed">
+                        <div class="chart-placeholder">
+                            <div class="chart-placeholder-icon">📈</div>
+                            <p>Select any stock from the table to load its live interactive candlestick chart</p>
+                        </div>
+                    </div>
+
+                    <!-- Quick Trade Strip below Chart -->
+                    <div class="chart-action-bar">
+                        <button class="btn btn-green btn-sm" id="chart-btn-buy" onclick="quickTradeSelected('BUY')">🟢 Buy (Trade)</button>
+                        <button class="btn btn-red btn-sm" id="chart-btn-sell" onclick="quickTradeSelected('SELL')">🔴 Sell (Trade)</button>
+                        <button class="btn btn-grey btn-sm" id="chart-btn-watch" onclick="quickWatchlistSelected()">⭐ + Watchlist</button>
+                    </div>
                 </div>
             </div>
         </section>
@@ -3003,8 +3123,8 @@
 <!-- Toast -->
 <div id="toast" class="toast"></div>
 
-<script src="/static/js/app.js?v=4"></script>
-<script src="/static/js/market.js?v=2"></script>
+<script src="/static/js/app.js?v=5"></script>
+<script src="/static/js/market.js?v=5"></script>
 <script src="/static/js/scanner.js?v=4"></script>
 <script src="/static/js/heatmap.js?v=2"></script>
 <script src="/static/js/trade.js?v=2"></script>
