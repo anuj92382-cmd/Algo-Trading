@@ -77,17 +77,17 @@ function showPage(name) {
     setText('pageTitle', titles[name] || name);
 
     // Lazy load
-    if (name === 'config')    initConfigPage();
-    if (name === 'mcx')       initMcxPage();
-    if (name === 'algotrade') initAlgoTradePage();
-    if (name === 'gainers' || name === 'losers') loadGainersLosers();
-    if (name === 'positions') fetchPositions();
-    if (name === 'trades')    fetchTrades();
-    if (name === 'orders')    fetchOrders();
-    if (name === 'sectors')   loadHeatmap();
-    if (name === 'reversals') initReversalsPage();
-    if (name === 'trade')     initTradePage();
-    if (name === 'stocks')    initStocksPage();
+    if (name === 'config' && typeof initConfigPage === 'function')          initConfigPage();
+    if (name === 'mcx' && typeof initMcxPage === 'function')                initMcxPage();
+    if (name === 'algotrade' && typeof initAlgoTradePage === 'function')    initAlgoTradePage();
+    if ((name === 'gainers' || name === 'losers') && typeof loadGainersLosers === 'function') loadGainersLosers();
+    if (name === 'positions' && typeof fetchPositions === 'function')       fetchPositions();
+    if (name === 'trades' && typeof fetchTrades === 'function')             fetchTrades();
+    if (name === 'orders' && typeof fetchOrders === 'function')             fetchOrders();
+    if (name === 'sectors' && typeof loadHeatmap === 'function')            loadHeatmap();
+    if (name === 'reversals' && typeof initReversalsPage === 'function')    initReversalsPage();
+    if (name === 'trade' && typeof initTradePage === 'function')            initTradePage();
+    if (name === 'stocks' && typeof initStocksPage === 'function')          initStocksPage();
 }
 
 function toggleSidebar() {
