@@ -474,9 +474,8 @@ def api_login():
 
 @app.route("/api/status")
 def api_status():
-    # Get current system time - assuming it's already in IST
-    # (User confirmed system shows 1:33 PM when market is open)
-    ist_now = datetime.now()
+    # Get current time in Indian Standard Time (IST)
+    ist_now = datetime.now(IST_tz)
     
     current_time = ist_now.time()
     current_day  = ist_now.weekday()  # 0=Monday, 6=Sunday
