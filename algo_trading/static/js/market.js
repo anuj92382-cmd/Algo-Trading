@@ -342,18 +342,47 @@ function embedTradingViewChart(symbol, interval = 'D') {
     const container = document.getElementById('stocks-chart-embed');
     if (!container) return;
 
-    // TradingView embed widget iframe
-    const sym = `NSE:${encodeURIComponent(symbol)}`;
-    const tvUrl = `https://s.tradingview.com/widgetembed/?frameElementId=tradingview_stock_chart&symbol=${sym}&interval=${encodeURIComponent(interval)}&hidesidetoolbar=0&symboledit=1&saveimage=1&toolbarbg=131722&studies=%5B%5D&theme=dark&style=1&timezone=Asia%2FKolkata&locale=en&utm_source=localhost`;
+    container.innerHTML = `<div id="tv_chart_container" style="width:100%;height:100%;"></div>`;
 
-    container.innerHTML = `<iframe 
-        id="tv-chart-frame"
-        src="${tvUrl}" 
-        style="width:100%;height:100%;border:none;border-radius:6px;"
-        allowtransparency="true" 
-        scrolling="no" 
-        allowfullscreen>
-    </iframe>`;
+    let tf = interval;
+    if (tf === '1D') tf = 'D';
+
+    function renderTV() {
+        try {
+            new TradingView.widget({
+                "autosize": true,
+                "symbol": `NSE:${symbol}`,
+                "interval": tf,
+                "timezone": "Asia/Kolkata",
+                "theme": "dark",
+                "style": "1",
+                "locale": "in",
+                "toolbar_bg": "#131722",
+                "enable_publishing": false,
+                "hide_top_toolbar": false,
+                "hide_side_toolbar": false,
+                "allow_symbol_change": true,
+                "container_id": "tv_chart_container",
+                "withdateranges": true,
+                "save_image": false,
+                "studies": [
+                    "MASimple@tv-basicstudies",
+                    "Volume@tv-basicstudies"
+                ]
+            });
+        } catch (e) {
+            console.error('TradingView init error:', e);
+        }
+    }
+
+    if (typeof TradingView !== 'undefined' && TradingView.widget) {
+        renderTV();
+    } else {
+        const script = document.createElement('script');
+        script.src = 'https://s3.tradingview.com/tv.js';
+        script.onload = renderTV;
+        document.head.appendChild(script);
+    }
 }
 
 function quickTradeSelected(direction) {
