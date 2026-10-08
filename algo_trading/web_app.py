@@ -46,6 +46,11 @@ IST_tz = pytz.timezone("Asia/Kolkata")
 app = Flask(__name__)
 app.secret_key = "algo_trading_secret_key_2024"
 
+@app.context_processor
+def inject_cache_buster():
+    import time
+    return dict(cache_v=int(time.time()))
+
 # ── Global bot state ─────────────────────────────────────────
 _state = {
     "kite":            None,
