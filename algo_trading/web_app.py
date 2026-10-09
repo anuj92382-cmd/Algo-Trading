@@ -1383,16 +1383,16 @@ def api_market_stocks():
         # Resolve universe
         fno_set = _get_fno_symbols(kite)
         if universe == "fno":
-            target_symbols = sorted(list(fno_set))
+            target_symbols = [s for s in sorted(list(fno_set)) if s in token_map]
         elif universe == "all_stocks" or universe == "all_nse":
             target_symbols = [
                 inst["tradingsymbol"] for inst in instruments
                 if inst.get("segment") == "NSE" and inst.get("instrument_type") == "EQ"
             ]
         elif universe in ("nifty50", "nifty100", "nifty500", "watchlist"):
-            target_symbols = _resolve_symbols(universe)
+            target_symbols = [s for s in _resolve_symbols(universe) if s in token_map]
         else:
-            target_symbols = sorted(list(fno_set))
+            target_symbols = [s for s in sorted(list(fno_set)) if s in token_map]
 
         # Filter by search term before query
         if search_q:
@@ -1425,6 +1425,8 @@ def api_market_stocks():
             sym = key.replace("NSE:", "")
             ltp = data.get("last_price", 0)
             if ltp > 0:
+                if universe == "fno" and sym not in fno_set:
+                    continue
                 if not search_q and (ltp < min_price or ltp > max_price):
                     continue
                 candidate_syms.append(sym)
@@ -1445,6 +1447,8 @@ def api_market_stocks():
         }
 
         for sym in candidate_syms:
+            if universe == "fno" and sym not in fno_set:
+                continue
             data = ohlc_all.get(f"NSE:{sym}", {})
             ltp = data.get("last_price", 0)
             ohlc_d = data.get("ohlc", {})
@@ -1669,6 +1673,8 @@ def api_market_stocks():
         # Fallback: if all_results empty due to strict filters, include candidate stocks
         if not all_results and candidate_syms:
             for sym in candidate_syms:
+                if universe == "fno" and sym not in fno_set:
+                    continue
                 data = ohlc_all.get(f"NSE:{sym}", {})
                 ltp = data.get("last_price", 0)
                 ohlc_d = data.get("ohlc", {})
@@ -1856,31 +1862,31 @@ NSE_FNO_SYMBOLS = {
     "AARTIIND", "ABB", "ABBOTINDIA", "ABCAPITAL", "ABFRL", "ACC", "ADANIENT",
     "ADANIPORTS", "ALKEM", "AMBUJACEM", "APOLLOHOSP", "APOLLOTYRE", "ASHOKLEY",
     "ASIANPAINT", "ASTRAL", "ATUL", "AUBANK", "AUROPHARMA", "AXISBANK",
-    "BAJAJ-AUTO", "BAJAJFINSV", "BAJFINANCE", "BALKRISIND", "BALRAMCHIN",
-    "BANDHANBNK", "BANKBARODA", "BATAINDIA", "BEL", "BERGEPAINT", "BHARATFORG",
-    "BHEL", "BIOCON", "BOSCHLTD", "BPCL", "BRITANNIA", "BSOFT", "CANBK",
-    "CANFINHOME", "CHAMBLFERT", "CHOLAFIN", "CIPLA", "COALINDIA", "COFORGE",
-    "COLPAL", "CONCOR", "COROMANDEL", "CROMPTON", "CUB", "CUMMINSIND", "DABUR",
-    "DALBHARAT", "DEEPAKNTR", "DELHIVERY", "DIVISLAB", "DIXON", "DLF", "DRREDDY",
+    "BAJAJ-AUTO", "BAJAJFINSV", "BAJFINANCE", "BALKRISIND", "BANDHANBNK",
+    "BANKBARODA", "BEL", "BERGEPAINT", "BHARATFORG", "BHEL", "BIOCON",
+    "BOSCHLTD", "BPCL", "BRITANNIA", "BSOFT", "CANBK", "CANFINHOME",
+    "CHAMBLFERT", "CHOLAFIN", "CIPLA", "COALINDIA", "COFORGE", "COLPAL",
+    "CONCOR", "COROMANDEL", "CROMPTON", "CUMMINSIND", "DABUR", "DALBHARAT",
+    "DEEPAKNTR", "DIVISLAB", "DIXON", "DLF", "DRLALPATHLAB", "DRREDDY",
     "EICHERMOT", "ESCORTS", "EXIDEIND", "FEDERALBNK", "GAIL", "GLENMARK",
-    "GMRINFRA", "GNFC", "GODREJCP", "GODREJPROP", "GRANULES", "GRASIM",
-    "FLUOROCHEM", "HAL", "HAVELLS", "HCLTECH", "HDFCAMC", "HDFCBANK", "HDFCLIFE",
+    "GMRAIRPORT", "GNFC", "GODREJCP", "GODREJPROP", "GRASIM", "GUJGASLTD",
+    "HAL", "HAVELLS", "HCLTECH", "HDFCAMC", "HDFCBANK", "HDFCLIFE",
     "HEROMOTOCO", "HINDALCO", "HINDPETRO", "HINDUNILVR", "ICICIBANK", "ICICIGI",
-    "ICICIPRULI", "IDEA", "IDFCFIRSTB", "IEX", "IGL", "INDHOTEL", "INDIACEM",
-    "INDIAMART", "INDIANB", "INDIGO", "INDUSINDBK", "INDUSTOWER", "INFY", "IOC",
-    "IPCALAB", "IRCTC", "ITC", "JINDALSTEL", "JKCEMENT", "JSWENERGY",
-    "JSWSTEEL", "JUBLFOOD", "KOTAKBANK", "LALPATHLAB", "LAURUSLABS", "LICHSGFIN",
-    "LT", "LTIM", "LTTS", "LUPIN", "M&M", "M&MFIN", "MANAPPURAM", "MARICO",
-    "MARUTI", "UNITDSPR", "MCX", "METROPOLIS", "MFSL", "MGL", "MOTHERSON",
-    "MPHASIS", "MRF", "MUTHOOTFIN", "NATIONALUM", "NAUKRI", "NAVINFLUOR",
-    "NESTLEIND", "NMDC", "NTPC", "OBEROIRLTY", "OFSS", "ONGC", "PAGEIND", "PIRAMALFIN",
-    "PERSISTENT", "PETRONET", "PFC", "PIDILITIND", "PIIND", "PNB", "POLYCAB",
-    "POWERGRID", "PRESTIGE", "PVRINOX", "RAMCOCEM", "RBLBANK", "RECLTD",
-    "RELIANCE", "SAIL", "SBICARD", "SBILIFE", "SBIN", "SHREECEM", "SHRIRAMFIN",
-    "SIEMENS", "SRF", "SUNPHARMA", "SUNTV", "SYNGENE", "TATACHEM", "TATACOMM",
-    "TATACONSUM", "TMCV", "TMPV", "TATAPOWER", "TATASTEEL", "TCS", "TECHM",
+    "ICICIPRULI", "IDEA", "IDFCFIRSTB", "IEX", "IGL", "INDHOTEL", "INDIAMART",
+    "INDIANB", "INDIGO", "INDUSINDBK", "INDUSTOWER", "INFY", "IOC", "IPCALAB",
+    "IRCTC", "ITC", "JINDALSTEL", "JKCEMENT", "JSWENERGY", "JSWSTEEL",
+    "JUBLFOOD", "KOTAKBANK", "LAURUSLABS", "LICHSGFIN", "LT", "LTIM", "LTTS",
+    "LUPIN", "M&M", "M&MFIN", "MANAPPURAM", "MARICO", "MARUTI", "MCDOWELL-N",
+    "MCX", "METROPOLIS", "MFSL", "MGL", "MOTHERSON", "MPHASIS", "MRF",
+    "MUTHOOTFIN", "NATIONALUM", "NAUKRI", "NAVINFLUOR", "NESTLEIND", "NMDC",
+    "NTPC", "OBEROIRLTY", "OFSS", "ONGC", "PAGEIND", "PEL", "PERSISTENT",
+    "PETRONET", "PFC", "PIDILITIND", "PIIND", "PNB", "POLYCAB", "POWERGRID",
+    "PRESTIGE", "PVRINOX", "RAMCOCEM", "RBLBANK", "RECLTD", "RELIANCE",
+    "SAIL", "SBICARD", "SBILIFE", "SBIN", "SHREECEM", "SHRIRAMFIN", "SIEMENS",
+    "SRF", "SUNPHARMA", "SUNTV", "SYNGENE", "TATACHEM", "TATACOMM",
+    "TATACONSUM", "TATAMOTORS", "TATAPOWER", "TATASTEEL", "TCS", "TECHM",
     "TITAN", "TORNTPHARM", "TORNTPOWER", "TRENT", "TVSMOTOR", "UBL",
-    "ULTRACEMCO", "UNIONBANK", "UPL", "VEDL", "VOLTAS", "WIPRO", "ZEEL", "ZYDUSLIFE"
+    "ULTRACEMCO", "UNIONBANK", "UPL", "VEDL", "VOLTAS", "WIPRO", "ZYDUSLIFE"
 }
 
 _fno_symbols_cache = set()
@@ -1890,7 +1896,7 @@ def _get_fno_symbols(kite=None) -> set:
     """Returns set of NSE Equity tradingsymbols that have active F&O contracts."""
     global _fno_symbols_cache, _fno_symbols_cache_time
     now = datetime.now()
-    if _fno_symbols_cache and _fno_symbols_cache_time and (now - _fno_symbols_cache_time).total_seconds() < 86400:
+    if _fno_symbols_cache and _fno_symbols_cache_time and (now - _fno_symbols_cache_time).total_seconds() < 3600:
         return _fno_symbols_cache
 
     fno_set = set(NSE_FNO_SYMBOLS)
@@ -1901,19 +1907,23 @@ def _get_fno_symbols(kite=None) -> set:
             valid_nse_eq = {
                 inst.get("tradingsymbol", "").strip().upper()
                 for inst in nse_instruments
-                if inst.get("instrument_type") == "EQ" and inst.get("tradingsymbol")
+                if inst.get("segment") == "NSE" and inst.get("instrument_type") == "EQ" and inst.get("tradingsymbol")
             }
-            indices = {"NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY", "NIFTYNXT50", "NIFTYFPI", "NIFTYIT"}
+            indices = {
+                "NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY", "NIFTYNXT50",
+                "NIFTYFPI", "NIFTYIT", "SENSEX", "BANKEX", "INDIAVIX", "INDIA VIX"
+            }
             dyn_symbols = {
                 inst.get("name", "").strip().upper()
                 for inst in nfo_instruments
                 if inst.get("name") and inst.get("name").strip().upper() not in indices
+                and (inst.get("segment") in ("NFO-OPT", "NFO-FUT", "NFO") or inst.get("instrument_type") in ("CE", "PE", "FUT"))
             }
-            # Only include dynamic symbols that actually exist as NSE EQ instruments
+            # Only include symbols that actually exist as active NSE EQ tradingsymbols
             valid_dyn = {s for s in dyn_symbols if s in valid_nse_eq}
-            if len(valid_dyn) > 20:
-                fno_set.update(valid_dyn)
-                logger.info(f"Loaded {len(fno_set)} active F&O equity underlyings from Kite NFO")
+            if len(valid_dyn) >= 30:
+                fno_set = valid_dyn
+                logger.info(f"Loaded {len(fno_set)} live active F&O equity underlyings from Kite NFO")
         except Exception as e:
             logger.debug(f"Kite NFO instruments fetch skipped/failed: {e}")
 
