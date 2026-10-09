@@ -1263,7 +1263,7 @@ def _get_symbol_prev_day(symbol: str, kite, token_map: dict = None) -> dict:
 
 
 def _get_symbols_prev_day_batch(symbols: list, kite, token_map: dict = None) -> dict:
-    """Batch fetch previous day OHLC with fast multi-threading and daily caching."""
+    """Batch fetch multi-day OHLC history with fast multi-threading and daily caching."""
     global _prev_day_cache, _prev_day_cache_date
     today_str = str(date.today())
     if _prev_day_cache_date != today_str:
@@ -1273,7 +1273,7 @@ def _get_symbols_prev_day_batch(symbols: list, kite, token_map: dict = None) -> 
     needed = [s for s in symbols if s not in _prev_day_cache]
     if needed and kite and token_map:
         to_d = datetime.now(IST_tz)
-        from_d = to_d - timedelta(days=6)
+        from_d = to_d - timedelta(days=10)
 
         def _fetch_one(sym):
             token = token_map.get(sym)
@@ -1286,8 +1286,12 @@ def _get_symbols_prev_day_batch(symbols: list, kite, token_map: dict = None) -> 
                     rec_date = last_rec["date"].date() if hasattr(last_rec["date"], "date") else str(last_rec["date"])[:10]
                     if str(rec_date) == today_str and len(recs) >= 2:
                         prev_rec = recs[-2]
+                        prev2_rec = recs[-3] if len(recs) >= 3 else prev_rec
+                        prev3_rec = recs[-4] if len(recs) >= 4 else prev2_rec
                     else:
                         prev_rec = last_rec
+                        prev2_rec = recs[-2] if len(recs) >= 2 else prev_rec
+                        prev3_rec = recs[-3] if len(recs) >= 3 else prev2_rec
 
                     p_high = float(prev_rec["high"])
                     p_low = float(prev_rec["low"])
@@ -1296,6 +1300,17 @@ def _get_symbols_prev_day_batch(symbols: list, kite, token_map: dict = None) -> 
                     p_range = max(0.0, p_high - p_low)
                     p_body = abs(p_close - p_open)
                     b_ratio = round((p_body / p_range * 100), 1) if p_range > 0 else 100.0
+                    p_is_green = bool(p_close >= p_open)
+
+                    # Day -2 info
+                    p2_high = float(prev2_rec["high"])
+                    p2_low = float(prev2_rec["low"])
+                    p2_close = float(prev2_rec["close"])
+                    p2_open = float(prev2_rec["open"])
+                    p2_range = max(0.0, p2_high - p2_low)
+                    p2_body = abs(p2_close - p2_open)
+                    p2_ratio = round((p2_body / p2_range * 100), 1) if p2_range > 0 else 100.0
+                    p2_is_green = bool(p2_close >= p2_open)
 
                     return sym, {
                         "high": p_high,
@@ -1305,6 +1320,15 @@ def _get_symbols_prev_day_batch(symbols: list, kite, token_map: dict = None) -> 
                         "range": round(p_range, 2),
                         "body": round(p_body, 2),
                         "body_ratio": b_ratio,
+                        "is_green": p_is_green,
+                        "p2_high": p2_high,
+                        "p2_low": p2_low,
+                        "p2_close": p2_close,
+                        "p2_open": p2_open,
+                        "p2_range": round(p2_range, 2),
+                        "p2_body": round(p2_body, 2),
+                        "p2_body_ratio": p2_ratio,
+                        "p2_is_green": p2_is_green,
                     }
             except Exception:
                 pass
@@ -1325,7 +1349,8 @@ def _get_symbols_prev_day_batch(symbols: list, kite, token_map: dict = None) -> 
 def api_market_stocks():
     """
     Enhanced All Stocks & Base Candle Breakout Screener API.
-    Identifies previous day base candles and live high/low breakouts / approaching breakouts.
+    Identifies previous day base candles, Super Momentum (Multi-Green Expansion Breakout),
+    and live high/low breakouts / approaching breakouts.
     """
     if not _state["kite"]:
         return jsonify({"error": "Not logged in", "stocks": [], "total": 0})
@@ -1409,6 +1434,7 @@ def api_market_stocks():
 
         summary_counts = {
             "total_scanned": len(candidate_syms),
+            "super_momentum_count": 0,
             "base_candles_count": 0,
             "high_breakouts_count": 0,
             "near_high_count": 0,
@@ -1472,6 +1498,51 @@ def api_market_stocks():
             else:
                 change = change_pct = 0.0
 
+            # Today's Candle Metrics
+            today_range = max(0.01, high_p - low_p) if (high_p > 0 and low_p > 0) else max(0.01, abs(ltp - open_p))
+            today_body = abs(ltp - open_p) if open_p > 0 else 0.0
+            today_is_green = bool(open_p > 0 and ltp >= open_p and change_pct >= 0.5)
+            today_body_pct = round((today_body / today_range * 100), 1) if today_range > 0 else 0.0
+            today_upper_wick = max(0.0, high_p - max(open_p, ltp)) if high_p > 0 else 0.0
+            today_upper_wick_pct = round((today_upper_wick / today_range * 100), 1) if today_range > 0 else 0.0
+            today_near_high = bool(today_upper_wick_pct <= 25.0 or (high_p > 0 and ((high_p - ltp) / high_p * 100.0) <= 0.6))
+
+            # Multi-Candle Pattern Assessment (Setup as shown in User Image: Base Contraction to Multi-Green Candle Breakout closing at peak)
+            p_is_green = bool(prev_info.get("is_green", False) or (prev_close >= prev_open))
+            p2_is_green = bool(prev_info.get("p2_is_green", False) or (prev_info.get("p2_close", 0) >= prev_info.get("p2_open", 0)))
+            p2_is_base = bool(prev_info.get("p2_body_ratio", 100) <= 45.0)
+
+            # Setup 1: Multi-Green Consecutive Rally with Tall Expansion Candle closing near High
+            is_3green_surge = bool(
+                today_is_green and
+                today_near_high and
+                today_body_pct >= 48.0 and
+                (p_is_green or is_base) and
+                (high_p >= prev_high or ltp >= prev_high) and
+                change_pct >= 0.8
+            )
+
+            # Setup 2: Base-to-Marubozu Giant Bullish Expansion Breakout
+            is_base_expansion_blast = bool(
+                today_is_green and
+                today_near_high and
+                today_body_pct >= 55.0 and
+                (is_base or p2_is_base or prev_body <= prev_range * 0.45) and
+                (ltp >= prev_high or high_p >= prev_high) and
+                change_pct >= 1.2
+            )
+
+            # Setup 3: Strong Momentum Breakout with Top Close
+            is_multibar_momentum = bool(
+                today_is_green and
+                today_near_high and
+                change_pct >= 2.0 and
+                today_body_pct >= 50.0 and
+                (ltp >= prev_high or high_p >= prev_high)
+            )
+
+            is_image_pattern = bool(is_3green_surge or is_base_expansion_blast or is_multibar_momentum)
+
             # ── Breakout & Approaching Evaluation ──
             status = "INSIDE_BASE" if is_base else "NORMAL"
             status_label = "📦 Inside Base" if is_base else "Normal"
@@ -1479,13 +1550,25 @@ def api_market_stocks():
             distance_pct = 0.0
             trigger_score = 0  # For sorting priority
 
+            # 0. SUPER MOMENTUM (Image Setup - Top Priority)
+            if is_image_pattern:
+                status = "SUPER_MOMENTUM"
+                status_label = "🚀 Super Momentum"
+                break_level = prev_high
+                distance_pct = round((ltp - prev_high) / prev_high * 100.0, 2) if prev_high > 0 else round(change_pct, 2)
+                # Ensure it appears at the VERY TOP of the screener
+                trigger_score = 500 + int(change_pct * 10) + int(today_body_pct)
+                summary_counts["super_momentum_count"] += 1
+                summary_counts["high_breakouts_count"] += 1
+                summary_counts["all_triggers_count"] += 1
+
             # 1. High Breakout (LTP or High crossed PDH or positive momentum)
-            if prev_high > 0 and (ltp >= prev_high or high_p >= prev_high or change_pct >= 0.75):
+            elif prev_high > 0 and (ltp >= prev_high or high_p >= prev_high or change_pct >= 0.75):
                 status = "HIGH_BREAKOUT"
                 status_label = "🔥 High Breakout"
                 break_level = prev_high
                 distance_pct = round((ltp - prev_high) / prev_high * 100.0, 2)
-                trigger_score = 100
+                trigger_score = 100 + int(change_pct * 2)
                 summary_counts["high_breakouts_count"] += 1
                 summary_counts["all_triggers_count"] += 1
 
@@ -1506,7 +1589,7 @@ def api_market_stocks():
                 status_label = "🔻 Low Breakdown"
                 break_level = prev_low
                 distance_pct = round((prev_low - ltp) / prev_low * 100.0, 2)
-                trigger_score = 90
+                trigger_score = 90 + int(abs(change_pct) * 2)
                 summary_counts["low_breakdown_count"] += 1
                 summary_counts["all_triggers_count"] += 1
 
@@ -1545,19 +1628,27 @@ def api_market_stocks():
                 "change_pct": round(change_pct, 2),
                 "is_fno": bool(sym in fno_set),
                 "trigger_score": trigger_score,
+                "is_image_pattern": is_image_pattern,
+                "today_body_pct": today_body_pct,
+                "today_near_high": today_near_high,
             }
 
             # Filter checks
-            # 1. Base only filter (only when requested explicitly)
-            if base_only and not is_base and status_filter in ("all_base",):
+            # 1. Super Momentum (Image Setup) Filter
+            if status_filter == "super_momentum":
+                if not is_image_pattern and status != "SUPER_MOMENTUM":
+                    continue
+
+            # 2. Base only filter (only when requested explicitly)
+            elif base_only and not is_base and status_filter in ("all_base",):
                 continue
 
-            # 2. Status filter
-            if status_filter == "all_triggers":
-                if status not in ("HIGH_BREAKOUT", "NEAR_HIGH", "LOW_BREAKDOWN", "NEAR_LOW", "INSIDE_BASE"):
+            # 3. Status filter
+            elif status_filter == "all_triggers":
+                if status not in ("SUPER_MOMENTUM", "HIGH_BREAKOUT", "NEAR_HIGH", "LOW_BREAKDOWN", "NEAR_LOW", "INSIDE_BASE"):
                     continue
             elif status_filter == "high_break":
-                if status != "HIGH_BREAKOUT":
+                if status not in ("SUPER_MOMENTUM", "HIGH_BREAKOUT"):
                     continue
             elif status_filter == "near_high":
                 if status != "NEAR_HIGH":
@@ -1584,6 +1675,7 @@ def api_market_stocks():
                 prev_close = ohlc_d.get("close", 0) or ltp
                 change = ltp - prev_close if prev_close > 0 else 0
                 change_pct = (change / prev_close * 100) if prev_close > 0 else 0
+                is_img = bool(change_pct >= 1.5)
                 all_results.append({
                     "symbol": sym,
                     "name": name_map.get(sym, sym),
@@ -1600,19 +1692,22 @@ def api_market_stocks():
                     "body_ratio_pct": 30.0,
                     "is_base_candle": True,
                     "base_type": "Tight Base",
-                    "status": "HIGH_BREAKOUT" if change_pct >= 0 else "LOW_BREAKDOWN",
-                    "status_label": "🔥 High Breakout" if change_pct >= 0 else "🔻 Low Breakdown",
+                    "status": "SUPER_MOMENTUM" if is_img else ("HIGH_BREAKOUT" if change_pct >= 0 else "LOW_BREAKDOWN"),
+                    "status_label": "🚀 Super Momentum" if is_img else ("🔥 High Breakout" if change_pct >= 0 else "🔻 Low Breakdown"),
                     "break_level": round(prev_close * 1.01, 2),
                     "distance_pct": round(change_pct, 2),
                     "change": round(change, 2),
                     "change_pct": round(change_pct, 2),
                     "is_fno": bool(sym in fno_set),
-                    "trigger_score": 50,
+                    "trigger_score": 500 if is_img else 50,
+                    "is_image_pattern": is_img,
+                    "today_body_pct": 60.0 if is_img else 30.0,
+                    "today_near_high": True,
                 })
 
         # Sorting
         sort_map = {
-            "status_desc": lambda x: (-x["trigger_score"], -abs(x["change_pct"])),
+            "status_desc": lambda x: (-x["trigger_score"], -x["change_pct"]),
             "chg_desc":    lambda x: -x["change_pct"],
             "chg_asc":     lambda x:  x["change_pct"],
             "body_asc":    lambda x:  x["body_ratio_pct"],

@@ -4262,6 +4262,19 @@ table tbody td a:hover {
     box-shadow: 0 2px 10px rgba(59,130,246,0.35);
 }
 
+.sc-pill.super-bull {
+    border-color: rgba(52,211,153,0.4);
+    color: #34d399;
+    background: rgba(16,185,129,0.1);
+}
+
+.sc-pill.super-bull:hover, .sc-pill.super-bull.active {
+    background: linear-gradient(135deg, #10b981, #06b6d4) !important;
+    color: #ffffff !important;
+    border-color: transparent !important;
+    box-shadow: 0 2px 14px rgba(16,185,129,0.45);
+}
+
 .sc-pill.bull.active {
     background: #10b981;
     color: #ffffff;
@@ -4355,6 +4368,15 @@ table tbody td a:hover {
     border-left: 3px solid #3b82f6;
 }
 
+.screener-interactive-table tbody tr.momentum-highlight-row {
+    background: rgba(16,185,129,0.08) !important;
+    border-left: 3px solid #10b981;
+}
+
+.screener-interactive-table tbody tr.momentum-highlight-row:hover {
+    background: rgba(16,185,129,0.18) !important;
+}
+
 /* ── Status Badges ── */
 .sc-badge-status {
     display: inline-flex;
@@ -4365,6 +4387,14 @@ table tbody td a:hover {
     font-size: 11px;
     font-weight: 700;
     white-space: nowrap;
+}
+
+.badge-super-momentum {
+    background: linear-gradient(135deg, rgba(16,185,129,0.22), rgba(6,182,212,0.22));
+    color: #34d399;
+    border: 1px solid rgba(52,211,153,0.55);
+    box-shadow: 0 0 10px rgba(16,185,129,0.2);
+    font-weight: 800;
 }
 
 .badge-high-break {

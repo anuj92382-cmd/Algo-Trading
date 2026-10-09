@@ -180,6 +180,7 @@ async function loadStocks(isSilent = false) {
 function updateSummaryBadges(sum) {
     if (!sum) return;
     setText('cnt-all-triggers', sum.all_triggers_count || 0);
+    setText('cnt-super-momentum', sum.super_momentum_count || 0);
     setText('cnt-high-break',   sum.high_breakouts_count || 0);
     setText('cnt-near-high',    sum.near_high_count || 0);
     setText('cnt-low-break',    sum.low_breakdown_count || 0);
@@ -200,10 +201,13 @@ function renderStocksTable(stocks) {
     const rows = stocks.map((s, i) => {
         const isSelected = _selectedStock && _selectedStock.symbol === s.symbol;
         const selectedCls = isSelected ? 'selected-row' : '';
+        const highlightCls = (s.is_image_pattern || s.status === 'SUPER_MOMENTUM') ? 'momentum-highlight-row' : '';
 
         // Status badge
         let statusBadge = '';
-        if (s.status === 'HIGH_BREAKOUT') {
+        if (s.is_image_pattern || s.status === 'SUPER_MOMENTUM') {
+            statusBadge = `<span class="sc-badge-status badge-super-momentum" title="Image Setup: Base to Multi-Green Candle Blast (Closing near High)">🚀 Super Momentum</span>`;
+        } else if (s.status === 'HIGH_BREAKOUT') {
             statusBadge = `<span class="sc-badge-status badge-high-break">🔥 High Breakout</span>`;
         } else if (s.status === 'NEAR_HIGH') {
             statusBadge = `<span class="sc-badge-status badge-near-high">⚡ Near High Break</span>`;
@@ -233,7 +237,9 @@ function renderStocksTable(stocks) {
         const sign = s.change_pct > 0 ? '+' : '';
 
         let distHtml = '';
-        if (s.status === 'HIGH_BREAKOUT') {
+        if (s.is_image_pattern || s.status === 'SUPER_MOMENTUM') {
+            distHtml = `<span class="green" style="font-weight:700">🚀 Blast +${s.change_pct.toFixed(2)}% (Near High)</span>`;
+        } else if (s.status === 'HIGH_BREAKOUT') {
             distHtml = `<span class="green"><b>+${s.distance_pct.toFixed(2)}%</b> above PDH</span>`;
         } else if (s.status === 'NEAR_HIGH') {
             distHtml = `<span class="yellow"><b>${Math.abs(s.distance_pct).toFixed(2)}%</b> to PDH</span>`;
@@ -247,7 +253,7 @@ function renderStocksTable(stocks) {
 
         const fnoPill = s.is_fno ? `<span class="fno-tag" title="F&O Eligible">F&O</span>` : '';
 
-        return `<tr class="screener-row ${selectedCls}" onclick="onStockRowClicked('${s.symbol}')" id="row-${s.symbol}">
+        return `<tr class="screener-row ${selectedCls} ${highlightCls}" onclick="onStockRowClicked('${s.symbol}')" id="row-${s.symbol}">
             <td class="dim">${i + 1}</td>
             <td>
                 <div style="display:flex;align-items:center;gap:5px">
