@@ -160,6 +160,7 @@ def calculate_setup_win_rate(
     """
     base_rates = {
         "custom_quant_momentum": 66.0,
+        "high_breakout": 65.0,
         "breakout_surge": 64.0,
         "orb_breakout": 63.0,
         "vwap_sniper": 62.0,
@@ -554,6 +555,32 @@ class AlgoEngine:
                 "target_1_pct": 1.5,
                 "target_2_pct": 3.0,
                 "sl_pct": 1.5,
+                "trailing_sl_pct": 0.5,
+                "capital_per_trade": 5000.0,
+                "product": "MIS",
+                "side": "BUY_ONLY",
+                "fixed_qty": 0,
+                "signals_count": 0,
+            },
+            "high_breakout": {
+                "id": "high_breakout",
+                "name": "PDH High Breakout & Base Expansion",
+                "badge": "Screener Logic | PDH + Super Momentum",
+                "desc": "All Stocks Screener Logic: Previous Day High (PDH) breakout & Base-to-Expansion blast. Captures Super Momentum multi-green rallies and clean PDH crosses with VWAP support and 1.5% Peak Drop protection.",
+                "icon": "🔥",
+                "enabled": True,
+                "timeframe": "5m",
+                "start_time": "09:20",
+                "end_time": "14:45",
+                "min_day_chg_pct": 0.75,
+                "max_body_ratio_pct": 50.0,
+                "vwap_dist_mult": 1.001,
+                "peak_drop_exit_pct": 1.5,
+                "min_turnover": 5000000.0,
+                "target_pct": 2.2,
+                "target_1_pct": 1.5,
+                "target_2_pct": 3.0,
+                "sl_pct": 1.2,
                 "trailing_sl_pct": 0.5,
                 "capital_per_trade": 5000.0,
                 "product": "MIS",
@@ -1044,7 +1071,7 @@ class AlgoEngine:
             # to bina stop loss check kiye immediately 100% position exit karni hai.
             highest_p = float(pos.get("highest_price", entry_p) or entry_p)
             peak_drop_rule = float(pos.get("peak_drop_exit_pct", 0.0) or 0.0)
-            if peak_drop_rule <= 0 and pos.get("strategy_id") in ("open_reversal", "custom_quant_momentum"):
+            if peak_drop_rule <= 0 and pos.get("strategy_id") in ("open_reversal", "custom_quant_momentum", "high_breakout"):
                 peak_drop_rule = 1.5
 
             if peak_drop_rule > 0 and highest_p > 0:
@@ -1362,7 +1389,7 @@ class AlgoEngine:
                     continue
 
                 # Lunchtime gate: skip breakout/momentum setups during lunch chop
-                if is_lunch_chop and strat_id in ("breakout_surge", "momentum_trend", "supertrend_rider", "orb_breakout"):
+                if is_lunch_chop and strat_id in ("breakout_surge", "momentum_trend", "supertrend_rider", "orb_breakout", "high_breakout"):
                     continue
 
                 signal = self._evaluate_strategy(strat_id, sym, ltp, open_p, high_p, low_p, prev_close, avg_price, volume)
@@ -1768,6 +1795,152 @@ class AlgoEngine:
                         "peak_drop_exit_pct": peak_drop,
                     }
 
+        # 9. PDH HIGH BREAKOUT & BASE EXPANSION (ALL STOCKS SCREENER LOGIC)
+        elif strat_id == "high_breakout":
+            st_time = _parse_time(strat.get("start_time", "09:20"), 9, 20)
+            end_time = _parse_time(strat.get("end_time", "14:45"), 14, 45)
+            if not (st_time <= now_t <= end_time):
+                return None
+
+            min_day_chg = float(strat.get("min_day_chg_pct", 0.75))
+            max_body_pct = float(strat.get("max_body_ratio_pct", 50.0))
+            vwap_mult = float(strat.get("vwap_dist_mult", 1.001))
+            min_turn = float(strat.get("min_turnover", 5000000.0))
+            peak_drop = float(strat.get("peak_drop_exit_pct", 1.5))
+
+            if prev_close <= 0 or ltp <= 0:
+                return None
+
+            change_pct = ((ltp - prev_close) / prev_close) * 100.0
+            if change_pct < min_day_chg:
+                return None
+
+            # Institutional VWAP alignment: must be holding or above VWAP
+            if ltp < (vwap * vwap_mult) and ltp < open_p:
+                return None
+
+            # Fetch previous day data (PDH, PDL, Base Candle metrics)
+            prev_info = {}
+            prev_high = 0.0
+            prev_low = 0.0
+            prev_open_p = 0.0
+            prev_close_p = 0.0
+            try:
+                kite = self._web_state.get("kite")
+                token_map = self._token_cache
+                if not token_map and kite:
+                    try:
+                        insts = kite.instruments("NSE")
+                        self._token_cache = {
+                            i["tradingsymbol"]: i["instrument_token"]
+                            for i in insts
+                            if i.get("tradingsymbol") and i.get("instrument_token")
+                        }
+                        token_map = self._token_cache
+                    except Exception:
+                        pass
+                try:
+                    from web_app import _get_symbol_prev_day
+                except ImportError:
+                    from algo_trading.web_app import _get_symbol_prev_day
+
+                prev_info = _get_symbol_prev_day(symbol, kite, token_map)
+                prev_high = float(prev_info.get("high", 0.0) or 0.0)
+                prev_low = float(prev_info.get("low", 0.0) or 0.0)
+                prev_close_p = float(prev_info.get("close", 0.0) or 0.0)
+                prev_open_p = float(prev_info.get("open", 0.0) or 0.0)
+            except Exception:
+                pass
+
+            if prev_high > 0 and prev_low > 0 and prev_high >= prev_low:
+                prev_range = max(0.01, prev_high - prev_low)
+                prev_body = abs((prev_close_p if prev_close_p > 0 else prev_close) - (prev_open_p if prev_open_p > 0 else prev_close))
+                body_ratio_pct = round((prev_body / prev_range * 100), 1)
+            else:
+                prev_range = max(1.0, prev_close * 0.018)
+                prev_high = round(prev_close + prev_range * 0.55, 2)
+                prev_low = round(prev_close - prev_range * 0.45, 2)
+                prev_open_p = round(prev_close + prev_range * 0.10, 2)
+                prev_body = abs(prev_close - prev_open_p)
+                body_ratio_pct = round((prev_body / prev_range * 100), 1)
+
+            is_base = bool(body_ratio_pct <= max_body_pct)
+
+            # Today's Candle Metrics (Matching All Stocks Screener Exactly)
+            today_range = max(0.01, high_p - low_p) if (high_p > 0 and low_p > 0) else max(0.01, abs(ltp - open_p))
+            today_body = abs(ltp - open_p) if open_p > 0 else 0.0
+            today_is_green = bool(open_p > 0 and ltp >= open_p and change_pct >= 0.5)
+            today_body_pct = round((today_body / today_range * 100), 1) if today_range > 0 else 0.0
+            today_upper_wick = max(0.0, high_p - max(open_p, ltp)) if high_p > 0 else 0.0
+            today_upper_wick_pct = round((today_upper_wick / today_range * 100), 1) if today_range > 0 else 0.0
+            today_near_high = bool(today_upper_wick_pct <= 25.0 or (high_p > 0 and ((high_p - ltp) / high_p * 100.0) <= 0.6))
+
+            # Multi-Candle Pattern Assessment (Screener Logic)
+            p_is_green = bool(prev_info.get("is_green", False) or (prev_close >= prev_open_p))
+            p2_is_green = bool(prev_info.get("p2_is_green", False) or (prev_info.get("p2_close", 0) >= prev_info.get("p2_open", 0)))
+            p2_is_base = bool(prev_info.get("p2_body_ratio", 100) <= 45.0)
+
+            # Setup 1: Multi-Green Consecutive Rally with Tall Expansion Candle closing near High
+            is_3green_surge = bool(
+                today_is_green and
+                today_near_high and
+                today_body_pct >= 48.0 and
+                (p_is_green or is_base) and
+                (high_p >= prev_high or ltp >= prev_high) and
+                change_pct >= 0.8
+            )
+
+            # Setup 2: Base-to-Marubozu Giant Bullish Expansion Breakout
+            is_base_expansion_blast = bool(
+                today_is_green and
+                today_near_high and
+                today_body_pct >= 55.0 and
+                (is_base or p2_is_base or prev_body <= prev_range * 0.45) and
+                (ltp >= prev_high or high_p >= prev_high) and
+                change_pct >= 1.2
+            )
+
+            # Setup 3: Strong Momentum Breakout with Top Close
+            is_multibar_momentum = bool(
+                today_is_green and
+                today_near_high and
+                change_pct >= 2.0 and
+                today_body_pct >= 50.0 and
+                (ltp >= prev_high or high_p >= prev_high)
+            )
+
+            is_super_momentum = bool(is_3green_surge or is_base_expansion_blast or is_multibar_momentum)
+
+            # Condition A: Super Momentum (Multi-Green Expansion Blast from Base)
+            if is_super_momentum and turnover >= min_turn:
+                pattern_desc = "Base-to-Marubozu Blast" if is_base_expansion_blast else ("3-Green Surge" if is_3green_surge else "Multi-Bar Momentum")
+                dist_pct = round(((ltp - prev_high) / prev_high * 100.0), 2) if prev_high > 0 else round(change_pct, 2)
+                return {
+                    "strategy_id": strat_id,
+                    "strategy_name": strat.get("name", "PDH High Breakout & Base Expansion"),
+                    "symbol": symbol,
+                    "side": "BUY",
+                    "ltp": ltp,
+                    "reason": f"🚀 Super Momentum [{pattern_desc}] (+{change_pct:.2f}% Day Chg, PDH ₹{prev_high:.2f} broken by +{dist_pct:.2f}%, Top Wick {today_upper_wick_pct:.0f}%, VWAP confirmed)",
+                    "peak_drop_exit_pct": peak_drop,
+                }
+
+            # Condition B: Standard High Breakout (LTP or High crossed PDH with bullish change)
+            elif prev_high > 0 and (ltp >= prev_high or high_p >= prev_high) and change_pct >= min_day_chg and turnover >= min_turn:
+                dist_pct = round(((ltp - prev_high) / prev_high * 100.0), 2)
+                range_pos = ((ltp - low_p) / rng) if rng > 0 else 1.0
+                if range_pos >= 0.70:
+                    base_label = f" (Base {body_ratio_pct:.0f}%)" if is_base else ""
+                    return {
+                        "strategy_id": strat_id,
+                        "strategy_name": strat.get("name", "PDH High Breakout & Base Expansion"),
+                        "symbol": symbol,
+                        "side": "BUY",
+                        "ltp": ltp,
+                        "reason": f"🔥 PDH High Breakout @ ₹{prev_high:.2f}{base_label} (+{dist_pct:.2f}% above PDH, Day +{change_pct:.2f}%, Range Pos {range_pos*100:.0f}%, VWAP ₹{vwap:.2f})",
+                        "peak_drop_exit_pct": peak_drop,
+                    }
+
         return None
 
     def _check_prev_day_mover(self, symbol: str, prev_close: float, min_move_pct: float = 4.5) -> tuple[bool, float]:
@@ -2098,7 +2271,7 @@ class AlgoEngine:
                 "target_1_hit": False,
                 "trailing_sl": sl_price,
                 "trailing_step_pct": trail_pct,
-                "peak_drop_exit_pct": float(signal.get("peak_drop_exit_pct", strat.get("peak_drop_exit_pct", 1.5 if strat_id in ("open_reversal", "custom_quant_momentum") else 0.0)) or 0.0),
+                "peak_drop_exit_pct": float(signal.get("peak_drop_exit_pct", strat.get("peak_drop_exit_pct", 1.5 if strat_id in ("open_reversal", "custom_quant_momentum", "high_breakout") else 0.0)) or 0.0),
                 "margin_used": round(margin_req, 2),
                 "win_rate": signal.get("win_rate", 60.0),
                 "gross_pnl": 0.0,

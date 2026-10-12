@@ -446,6 +446,10 @@ function renderStrategiesGrid(strategies, totalCap) {
                         <button class="btn btn-sm btn-cyan" onclick="openQuantScannerModal('${s.id}')" title="Live 4-Filter Scanner Stocks Table">
                             📋 View Stocks
                         </button>` : ''}
+                        ${(s.id === 'high_breakout') ? `
+                        <button class="btn btn-sm btn-cyan" onclick="switchPage('stocks')" title="Open All Stocks Screener">
+                            🔍 Screener
+                        </button>` : ''}
                         <button class="btn btn-sm btn-strat-info" onclick="openAlgoStratAnalytics('${s.id}')" title="Strategy Performance & Win/Loss Analytics">
                             ℹ️ Info
                         </button>
